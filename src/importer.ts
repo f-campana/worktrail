@@ -148,7 +148,9 @@ export async function importSources(
             thread.id,
             redactedTitle,
             enrichment.updatedAt ?? null,
-            enrichment.archived === undefined ? null : Number(enrichment.archived),
+            enrichment.archived === undefined
+              ? null
+              : Number(enrichment.archived),
           );
         if (redactedTitle) {
           database.raw
@@ -287,7 +289,7 @@ function persistEvent(
       event.kind,
       event.kind === "message" ? event.role : null,
       event.kind === "tool-call" ? event.tool : null,
-      "callId" in event ? event.callId ?? null : null,
+      "callId" in event ? (event.callId ?? null) : null,
       event.occurredAt,
       event.evidence.sourceRecordType,
       event.evidence.recordLine,
@@ -374,7 +376,10 @@ function persistEvent(
 
   if (event.kind === "file-change") {
     const path = redactAndBound(event.path, TEXT_LIMITS.path).text;
-    const persisted = redactAndBound(event.text ?? path, TEXT_LIMITS.fileChange);
+    const persisted = redactAndBound(
+      event.text ?? path,
+      TEXT_LIMITS.fileChange,
+    );
     insertEvidence(
       database,
       eventId,
@@ -513,7 +518,7 @@ function createEventKey(
         ? event.callId
         : event.kind === "file-change"
           ? event.path
-          : event.turnId ?? "";
+          : (event.turnId ?? "");
   return createHash("sha256")
     .update(
       `${externalId}\0${event.evidence.recordLine}\0${event.kind}\0${discriminator}`,
@@ -530,7 +535,10 @@ function insertDiagnostic(
   detail: string,
   recordLine: number | null,
 ): void {
-  const boundedDetail = redactAndBound(detail, TEXT_LIMITS.evidenceExcerpt).text;
+  const boundedDetail = redactAndBound(
+    detail,
+    TEXT_LIMITS.evidenceExcerpt,
+  ).text;
   database.raw
     .prepare(
       `INSERT INTO diagnostics(

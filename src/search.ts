@@ -48,7 +48,9 @@ export function searchThreads(
 ): SearchResult[] {
   const terms = queryTerms(query);
   if (terms.length === 0) return [];
-  const ftsQuery = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
+  const ftsQuery = terms
+    .map((term) => `"${term.replaceAll('"', '""')}"`)
+    .join(" OR ");
 
   const rows = database.raw
     .prepare(
@@ -80,11 +82,15 @@ export function searchThreads(
 
   const lexicalResults: SearchResult[] = rows.map((row) => {
     const normalizedDocument = row.document_text.toLocaleLowerCase();
-    const matchedTerms = terms.filter((term) => normalizedDocument.includes(term));
+    const matchedTerms = terms.filter((term) =>
+      normalizedDocument.includes(term),
+    );
     const coverage = matchedTerms.length / terms.length;
     const score = Math.min(
       0.99,
-      Number((0.35 + coverage * 0.6 + Math.min(0.04, Math.abs(row.rank))).toFixed(3)),
+      Number(
+        (0.35 + coverage * 0.6 + Math.min(0.04, Math.abs(row.rank))).toFixed(3),
+      ),
     );
     const confidence: SearchResult["confidence"] =
       coverage >= 0.75 ? "high" : coverage >= 0.4 ? "medium" : "low";
@@ -103,16 +109,20 @@ export function searchThreads(
       fileReferences: matchingFiles(database, row.id, terms, row.cwd),
     };
   });
-  const combined = new Map(lexicalResults.map((result) => [result.externalId, result]));
+  const combined = new Map(
+    lexicalResults.map((result) => [result.externalId, result]),
+  );
   for (const result of aliasThreadMatches(database, query, terms, options)) {
     const existing = combined.get(result.externalId);
-    if (!existing || result.score > existing.score) combined.set(result.externalId, result);
+    if (!existing || result.score > existing.score)
+      combined.set(result.externalId, result);
     else if (result.aliasMatch) existing.aliasMatch = result.aliasMatch;
   }
   return [...combined.values()]
     .sort(
       (left, right) =>
-        right.score - left.score || right.lastActivity.localeCompare(left.lastActivity),
+        right.score - left.score ||
+        right.lastActivity.localeCompare(left.lastActivity),
     )
     .slice(0, Math.max(1, Math.min(limit, 20)));
 }
@@ -140,8 +150,9 @@ function matchingEvidence(
   return rows
     .map((row) => ({
       row,
-      overlap: terms.filter((term) => row.excerpt.toLocaleLowerCase().includes(term))
-        .length,
+      overlap: terms.filter((term) =>
+        row.excerpt.toLocaleLowerCase().includes(term),
+      ).length,
     }))
     .filter((candidate) => candidate.overlap > 0)
     .sort(
@@ -224,7 +235,8 @@ function aliasThreadMatches(
       aliasMatch: row.alias,
     };
     const previous = best.get(row.external_id);
-    if (!previous || result.score > previous.score) best.set(row.external_id, result);
+    if (!previous || result.score > previous.score)
+      best.set(row.external_id, result);
   }
   return [...best.values()];
 }

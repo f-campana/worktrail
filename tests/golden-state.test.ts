@@ -43,16 +43,19 @@ test("golden ambiguous query resolves through alias and excludes ignored lexical
     const search = searchThreads(database, "resume safe apply desktop", 10);
     assert.ok(search.length > 0);
     assert.equal(search[0]?.aliasMatch, "safe apply desktop");
-    assert.equal(search.some((result) => result.externalId === corpus.ignored), false);
+    assert.equal(
+      search.some((result) => result.externalId === corpus.ignored),
+      false,
+    );
 
     const state = buildStateResponse(database, "resume safe apply desktop");
     assert.equal(state.best?.workstream.id, corpus.targetWorkstreamId);
     assert.equal(state.best?.bestThread.externalId, corpus.desktopPrimary);
-    assert.ok(state.best?.signals.some((signal) => signal.type === "alias-match"));
     assert.ok(
-      state.best?.signals.some(
-        (signal) => signal.type === "manual-assignment",
-      ),
+      state.best?.signals.some((signal) => signal.type === "alias-match"),
+    );
+    assert.ok(
+      state.best?.signals.some((signal) => signal.type === "manual-assignment"),
     );
     assert.ok(
       state.best?.signals.some(
@@ -60,7 +63,9 @@ test("golden ambiguous query resolves through alias and excludes ignored lexical
       ),
     );
     assert.deepEqual(
-      state.best?.relatedFiles.filter((path) => path.endsWith("src/gui/apply.ts")),
+      state.best?.relatedFiles.filter((path) =>
+        path.endsWith("src/gui/apply.ts"),
+      ),
       ["src/gui/apply.ts"],
     );
   });
@@ -69,13 +74,16 @@ test("golden ambiguous query resolves through alias and excludes ignored lexical
 test("merge redirects to canonical target and preserves assignments, aliases, and corrections", async () => {
   await withGoldenCorpus((database, corpus) => {
     const workstreams = listWorkstreams(database);
-    const merged = workstreams.find((item) => item.id === corpus.sourceWorkstreamId);
+    const merged = workstreams.find(
+      (item) => item.id === corpus.sourceWorkstreamId,
+    );
     assert.equal(merged?.status, "merged");
     assert.equal(merged?.mergedIntoId, corpus.targetWorkstreamId);
 
-    const aliases = listWorkstreamAliases(database, corpus.targetWorkstreamId).map(
-      (item) => item.alias,
-    );
+    const aliases = listWorkstreamAliases(
+      database,
+      corpus.targetWorkstreamId,
+    ).map((item) => item.alias);
     assert.ok(aliases.includes("guarded apply"));
     assert.ok(aliases.includes("Atlas Legacy Apply"));
     assert.equal(
@@ -101,7 +109,9 @@ test("merge redirects to canonical target and preserves assignments, aliases, an
     const state = buildStateResponse(database, "guarded apply");
     assert.equal(state.best?.workstream.id, corpus.targetWorkstreamId);
     assert.equal(state.best?.relatedThreads.length, 3);
-    assert.ok(state.best?.signals.some((signal) => signal.type === "alias-match"));
+    assert.ok(
+      state.best?.signals.some((signal) => signal.type === "alias-match"),
+    );
   });
 });
 
@@ -111,7 +121,11 @@ test("golden state JSON includes stable structured signal fields", async () => {
     assert.ok(best);
     assert.ok(best.signals.length > 0);
     for (const signal of best.signals) {
-      assert.deepEqual(Object.keys(signal).sort(), ["detail", "type", "weight"]);
+      assert.deepEqual(Object.keys(signal).sort(), [
+        "detail",
+        "type",
+        "weight",
+      ]);
       assert.equal(typeof signal.type, "string");
       assert.equal(typeof signal.weight, "number");
       assert.equal(typeof signal.detail, "string");
@@ -123,7 +137,10 @@ test("eval metadata output omits transcript evidence unless explicitly requested
   await withGoldenCorpus((database) => {
     const withoutEvidence = evaluateQueries(database, ["safe apply desktop"]);
     assert.equal(Object.hasOwn(withoutEvidence[0] ?? {}, "evidence"), false);
-    assert.doesNotMatch(JSON.stringify(withoutEvidence), /Implemented safe apply/);
+    assert.doesNotMatch(
+      JSON.stringify(withoutEvidence),
+      /Implemented safe apply/,
+    );
 
     const withEvidence = evaluateQueries(database, ["safe apply desktop"], {
       withEvidence: true,
@@ -141,7 +158,10 @@ type GoldenCorpus = {
 };
 
 async function withGoldenCorpus(
-  operation: (database: WorktrailDatabase, corpus: GoldenCorpus) => void | Promise<void>,
+  operation: (
+    database: WorktrailDatabase,
+    corpus: GoldenCorpus,
+  ) => void | Promise<void>,
 ): Promise<void> {
   const temporary = await mkdtemp(join(tmpdir(), "worktrail-golden-"));
   const database = new WorktrailDatabase(join(temporary, "worktrail.db"));

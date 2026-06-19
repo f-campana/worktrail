@@ -38,14 +38,21 @@ test("parser handles current content-block output and structured patch changes",
   assert.ok(result && result.kind === "tool-result");
   assert.match(result.outputText ?? "", /Patch applied/);
   assert.ok(fileChange && fileChange.kind === "file-change");
-  assert.equal(fileChange.path, "/Users/example/work/sample-repo/src/widget.ts");
+  assert.equal(
+    fileChange.path,
+    "/Users/example/work/sample-repo/src/widget.ts",
+  );
   assert.equal(fileChange.changeType, "update");
   assert.match(fileChange.text ?? "", /valid = true/);
 
   const userMessages = events.filter(
     (event) => event.kind === "message" && event.role === "user",
   );
-  assert.equal(userMessages.length, 1, "response/event message mirror is deduplicated");
+  assert.equal(
+    userMessages.length,
+    1,
+    "response/event message mirror is deduplicated",
+  );
 });
 
 test("title enrichment uses the newest session-index row", async () => {
@@ -152,7 +159,11 @@ test("importer persists bounded normalized data and deduplicates re-imports", as
     const rawFixturePathCount = database.scalar(
       "SELECT count(*) FROM messages WHERE searchable_text LIKE '%/Users/example/%'",
     );
-    assert.equal(rawFixturePathCount, 0, "persisted message paths are normalized");
+    assert.equal(
+      rawFixturePathCount,
+      0,
+      "persisted message paths are normalized",
+    );
   } finally {
     database.close();
     await rm(temporary, { recursive: true, force: true });
@@ -229,9 +240,24 @@ test("importer enforces message, tool, and file-change byte limits", async () =>
     await importSources(database, adapter, { scope: "fixtures" });
 
     assertPersistedLimit(database, "messages", undefined, TEXT_LIMITS.message);
-    assertPersistedLimit(database, "evidence", "tool-input", TEXT_LIMITS.toolInput);
-    assertPersistedLimit(database, "evidence", "tool-output", TEXT_LIMITS.toolOutput);
-    assertPersistedLimit(database, "evidence", "file-change", TEXT_LIMITS.fileChange);
+    assertPersistedLimit(
+      database,
+      "evidence",
+      "tool-input",
+      TEXT_LIMITS.toolInput,
+    );
+    assertPersistedLimit(
+      database,
+      "evidence",
+      "tool-output",
+      TEXT_LIMITS.toolOutput,
+    );
+    assertPersistedLimit(
+      database,
+      "evidence",
+      "file-change",
+      TEXT_LIMITS.fileChange,
+    );
   } finally {
     database.close();
     await rm(temporary, { recursive: true, force: true });
@@ -253,7 +279,9 @@ test("search returns the expected evidence-backed fixture thread", async () => {
     );
     assert.equal(results[0]?.title, "Fix widget validation and tests");
     assert.equal(results[0]?.confidence, "high");
-    assert.ok(results[0]?.evidence.some((item) => /validation/.test(item.excerpt)));
+    assert.ok(
+      results[0]?.evidence.some((item) => /validation/.test(item.excerpt)),
+    );
     assert.ok(results[0]?.fileReferences.includes("src/widget.ts"));
   } finally {
     database.close();

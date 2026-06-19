@@ -62,7 +62,9 @@ export function createWorkstream(
     .prepare("SELECT public_id FROM workstreams WHERE normalized_name = ?")
     .get(normalizedName) as { public_id: string } | undefined;
   if (duplicate) {
-    throw new Error(`A workstream with that name already exists: ${duplicate.public_id}`);
+    throw new Error(
+      `A workstream with that name already exists: ${duplicate.public_id}`,
+    );
   }
   assertNameDoesNotConflictAlias(database, normalizedName);
 
@@ -153,7 +155,9 @@ export function renameWorkstream(
     )
     .get(normalizedName, workstream.id) as { public_id: string } | undefined;
   if (duplicate) {
-    throw new Error(`A workstream with that name already exists: ${duplicate.public_id}`);
+    throw new Error(
+      `A workstream with that name already exists: ${duplicate.public_id}`,
+    );
   }
   assertNameDoesNotConflictAlias(database, normalizedName, workstream.id);
 
@@ -280,7 +284,10 @@ export function ignoreThread(
     recordCorrection(database, {
       threadId: thread.id,
       type: "thread.ignore",
-      payload: { threadId: thread.external_id, ...(safeReason ? { reason: safeReason } : {}) },
+      payload: {
+        threadId: thread.external_id,
+        ...(safeReason ? { reason: safeReason } : {}),
+      },
       now,
     });
   });
@@ -344,7 +351,9 @@ export function addWorkstreamAlias(
     )
     .get(normalizedAlias, workstream.id) as { public_id: string } | undefined;
   if (nameConflict) {
-    throw new Error(`Alias conflicts with workstream: ${nameConflict.public_id}`);
+    throw new Error(
+      `Alias conflicts with workstream: ${nameConflict.public_id}`,
+    );
   }
 
   const existing = database.raw
@@ -359,7 +368,9 @@ export function addWorkstreamAlias(
     | undefined;
   if (existing) {
     if (existing.public_id !== workstream.public_id) {
-      throw new Error(`Alias already belongs to workstream: ${existing.public_id}`);
+      throw new Error(
+        `Alias already belongs to workstream: ${existing.public_id}`,
+      );
     }
     return {
       workstreamId: workstream.public_id,
@@ -455,7 +466,9 @@ export function mergeWorkstreams(
     throw new Error("Cannot merge a workstream into itself.");
   }
   if (source.status !== "active") {
-    throw new Error(`Source workstream is already merged into another workstream.`);
+    throw new Error(
+      `Source workstream is already merged into another workstream.`,
+    );
   }
 
   const now = new Date().toISOString();
@@ -482,9 +495,7 @@ export function mergeWorkstreams(
 
     if (normalizeName(source.name) !== normalizeName(target.name)) {
       const conflict = database.raw
-        .prepare(
-          "SELECT 1 FROM workstream_aliases WHERE normalized_alias = ?",
-        )
+        .prepare("SELECT 1 FROM workstream_aliases WHERE normalized_alias = ?")
         .get(normalizeName(source.name));
       if (!conflict) {
         database.raw
@@ -563,7 +574,9 @@ function requireListedWorkstream(
   database: WorktrailDatabase,
   identifier: string,
 ): Workstream {
-  const workstream = listWorkstreams(database).find((item) => item.id === identifier);
+  const workstream = listWorkstreams(database).find(
+    (item) => item.id === identifier,
+  );
   if (!workstream) throw new Error(`Unknown workstream: ${identifier}`);
   return workstream;
 }
@@ -602,7 +615,9 @@ function assertNameDoesNotConflictAlias(
     | { public_id: string }
     | undefined;
   if (conflict) {
-    throw new Error(`Workstream name conflicts with alias on: ${conflict.public_id}`);
+    throw new Error(
+      `Workstream name conflicts with alias on: ${conflict.public_id}`,
+    );
   }
 }
 

@@ -78,7 +78,10 @@ export type StateResponse = {
 
 export type WorkstreamDetailResponse = {
   version: 1;
-  workstream: StateWorkstream & { status: "active" | "merged"; aliases: string[] };
+  workstream: StateWorkstream & {
+    status: "active" | "merged";
+    aliases: string[];
+  };
   card: StateCard;
 };
 
@@ -86,36 +89,73 @@ export function buildWorkstreamDetail(
   database: WorktrailDatabase,
   publicId: string,
 ): WorkstreamDetailResponse | null {
-  const row = database.raw.prepare(
-    `SELECT id, public_id, name, status FROM workstreams WHERE public_id = ?`,
-  ).get(publicId) as { id: number; public_id: string; name: string; status: "active" | "merged" } | undefined;
+  const row = database.raw
+    .prepare(
+      `SELECT id, public_id, name, status FROM workstreams WHERE public_id = ?`,
+    )
+    .get(publicId) as
+    | {
+        id: number;
+        public_id: string;
+        name: string;
+        status: "active" | "merged";
+      }
+    | undefined;
   if (!row) return null;
-  const aliases = (database.raw.prepare(
-    `SELECT alias FROM workstream_aliases WHERE workstream_id = ? ORDER BY alias`,
-  ).all(row.id) as Array<{ alias: string }>).map((item) => item.alias);
+  const aliases = (
+    database.raw
+      .prepare(
+        `SELECT alias FROM workstream_aliases WHERE workstream_id = ? ORDER BY alias`,
+      )
+      .all(row.id) as Array<{ alias: string }>
+  ).map((item) => item.alias);
   const terms = queryTerms([row.name, ...aliases].join(" "));
-  const card = buildCard(database, {
-    origin: "manual", internalWorkstreamId: row.id, publicId: row.public_id,
-    name: row.name, score: 1, matches: [],
-  }, terms, 0);
+  const card = buildCard(
+    database,
+    {
+      origin: "manual",
+      internalWorkstreamId: row.id,
+      publicId: row.public_id,
+      name: row.name,
+      score: 1,
+      matches: [],
+    },
+    terms,
+    0,
+  );
   if (!card) return null;
-  return { version: 1, workstream: { ...card.workstream, status: row.status, aliases }, card };
+  return {
+    version: 1,
+    workstream: { ...card.workstream, status: row.status, aliases },
+    card,
+  };
 }
 
-export function listRecentWorkstreamCards(database: WorktrailDatabase, limit = 5) {
-  const rows = database.raw.prepare(
-    `SELECT w.public_id FROM workstreams w
+export function listRecentWorkstreamCards(
+  database: WorktrailDatabase,
+  limit = 5,
+) {
+  const rows = database.raw
+    .prepare(
+      `SELECT w.public_id FROM workstreams w
      JOIN workstream_assignments a ON a.workstream_id = w.id
      JOIN source_threads t ON t.id = a.thread_id
      LEFT JOIN ignored_threads i ON i.thread_id = t.id
      WHERE w.status = 'active' AND i.thread_id IS NULL
      GROUP BY w.id ORDER BY max(t.updated_at) DESC LIMIT ?`,
-  ).all(limit) as Array<{ public_id: string }>;
+    )
+    .all(limit) as Array<{ public_id: string }>;
   return rows.flatMap(({ public_id }) => {
     const detail = buildWorkstreamDetail(database, public_id);
     if (!detail) return [];
-    return [{ workstream: detail.card.workstream, latestActivity: detail.card.latestActivity,
-      confidence: detail.card.confidence, threadCount: detail.card.relatedThreads.length }];
+    return [
+      {
+        workstream: detail.card.workstream,
+        latestActivity: detail.card.latestActivity,
+        confidence: detail.card.confidence,
+        threadCount: detail.card.relatedThreads.length,
+      },
+    ];
   });
 }
 
@@ -177,7 +217,9 @@ export function buildStateResponse(
 
   const matchLimit = Math.max(20, limit * 4);
   const matches = searchThreads(database, query, matchLimit);
-  const allMatches = searchThreads(database, query, matchLimit, { includeIgnored: true });
+  const allMatches = searchThreads(database, query, matchLimit, {
+    includeIgnored: true,
+  });
   const visibleIds = new Set(matches.map((match) => match.externalId));
   const ignoredQueryMatches = allMatches.filter(
     (match) => !visibleIds.has(match.externalId),
@@ -236,7 +278,9 @@ export function buildStateResponse(
     }
   }
 
-  const unassigned = matches.filter((match) => !assignmentByThread.has(match.externalId));
+  const unassigned = matches.filter(
+    (match) => !assignmentByThread.has(match.externalId),
+  );
   const clustered = new Set<string>();
   for (const seed of unassigned) {
     if (clustered.has(seed.externalId)) continue;
@@ -265,7 +309,8 @@ export function buildStateResponse(
     .sort(
       (left, right) =>
         right.score - left.score ||
-        originWeight(right.workstream.origin) - originWeight(left.workstream.origin) ||
+        originWeight(right.workstream.origin) -
+          originWeight(left.workstream.origin) ||
         right.latestActivity.localeCompare(left.latestActivity),
     );
 
@@ -295,7 +340,10 @@ function buildCard(
   );
   const rows = candidate.internalWorkstreamId
     ? assignedThreadRows(database, candidate.internalWorkstreamId)
-    : threadRows(database, candidate.matches.map((match) => match.externalId));
+    : threadRows(
+        database,
+        candidate.matches.map((match) => match.externalId),
+      );
   if (rows.length === 0) return null;
 
   const relatedThreads = rows
@@ -308,10 +356,11 @@ function buildCard(
   const bestThread = relatedThreads[0];
   if (!bestThread) return null;
 
-  const latestActivity = relatedThreads
-    .map((thread) => thread.lastActivity)
-    .sort()
-    .at(-1) ?? bestThread.lastActivity;
+  const latestActivity =
+    relatedThreads
+      .map((thread) => thread.lastActivity)
+      .sort()
+      .at(-1) ?? bestThread.lastActivity;
   const internalThreadIds = rows.map((row) => row.id);
   const latestEvidence = collectEvidence(database, internalThreadIds, terms);
   const relatedFiles = collectFiles(database, internalThreadIds, terms, rows);
@@ -386,7 +435,9 @@ function buildSignals(input: {
       detail: `matched thread title "${input.bestThread.title}"`,
     });
   }
-  const sharedCwd = sharedValue(input.relatedThreads.map((thread) => thread.cwd));
+  const sharedCwd = sharedValue(
+    input.relatedThreads.map((thread) => thread.cwd),
+  );
   if (
     termOverlap(input.bestThread.cwd ?? "", input.terms) > 0 ||
     (input.relatedThreads.length > 1 && sharedCwd)
@@ -412,7 +463,9 @@ function buildSignals(input: {
           : `${input.relatedFiles.length} normalized related file(s)`,
     });
   }
-  const relevantEvidence = input.latestEvidence.filter((item) => item.relevance > 0);
+  const relevantEvidence = input.latestEvidence.filter(
+    (item) => item.relevance > 0,
+  );
   if (relevantEvidence.length > 0) {
     signals.push({
       type: "evidence-text-match",
@@ -433,7 +486,8 @@ function buildSignals(input: {
     });
   }
   return signals.sort(
-    (left, right) => right.weight - left.weight || left.type.localeCompare(right.type),
+    (left, right) =>
+      right.weight - left.weight || left.type.localeCompare(right.type),
   );
 }
 
@@ -617,7 +671,8 @@ function collectFiles(
   )
     .sort(
       (left, right) =>
-        termOverlap(right, terms) - termOverlap(left, terms) || left.localeCompare(right),
+        termOverlap(right, terms) - termOverlap(left, terms) ||
+        left.localeCompare(right),
     )
     .slice(0, 12);
 }
@@ -632,12 +687,13 @@ function shouldGroup(left: SearchResult, right: SearchResult): boolean {
     identityTerms(left.title ?? ""),
     identityTerms(right.title ?? ""),
   );
-  const recencyDays = Math.abs(
-    Date.parse(left.lastActivity) - Date.parse(right.lastActivity),
-  ) / 86_400_000;
+  const recencyDays =
+    Math.abs(Date.parse(left.lastActivity) - Date.parse(right.lastActivity)) /
+    86_400_000;
   const recent = Number.isFinite(recencyDays) && recencyDays <= 30;
   if (sameCwd && sharedFiles.length >= 1) return true;
-  if (titleSimilarity >= 0.6 && (sameCwd || sharedFiles.length >= 1)) return true;
+  if (titleSimilarity >= 0.6 && (sameCwd || sharedFiles.length >= 1))
+    return true;
   return sharedFiles.length >= 2 && recent;
 }
 
@@ -648,7 +704,14 @@ function meaningfulFiles(files: string[]): string[] {
 }
 
 function identityTerms(value: string): string[] {
-  const ignored = new Set(["add", "fix", "update", "implement", "work", "thread"]);
+  const ignored = new Set([
+    "add",
+    "fix",
+    "update",
+    "implement",
+    "work",
+    "thread",
+  ]);
   return queryTerms(value).filter((term) => !ignored.has(term));
 }
 
@@ -690,7 +753,9 @@ function aliasMatchScore(query: string, alias: string): number {
 function lexicalScore(value: string, terms: string[]): number {
   const matched = termOverlap(value, terms);
   if (matched === 0) return 0;
-  return Number(Math.min(0.97, 0.35 + (matched / terms.length) * 0.6).toFixed(3));
+  return Number(
+    Math.min(0.97, 0.35 + (matched / terms.length) * 0.6).toFixed(3),
+  );
 }
 
 function termOverlap(value: string, terms: string[]): number {
@@ -700,7 +765,9 @@ function termOverlap(value: string, terms: string[]): number {
 
 function sharedValue(values: Array<string | null>): string | null {
   const present = values.filter((value): value is string => Boolean(value));
-  return present.length > 1 && new Set(present).size === 1 ? present[0] ?? null : null;
+  return present.length > 1 && new Set(present).size === 1
+    ? (present[0] ?? null)
+    : null;
 }
 
 function recencyWeight(timestamp: string): number {

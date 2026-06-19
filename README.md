@@ -175,10 +175,7 @@ SQLite.
 Create a JSON query file as either an array or `{ "queries": [...] }`:
 
 ```json
-[
-  "resume safe apply GUI",
-  "widget validation"
-]
+["resume safe apply GUI", "widget validation"]
 ```
 
 Run the queries against a local database:
@@ -231,13 +228,13 @@ text reaches SQLite, Worktrail redacts common secrets, normalizes home paths to
 
 Persisted limits:
 
-| Content | Maximum |
-| --- | ---: |
-| Message | 8 KB |
-| Tool input | 4 KB |
-| Tool output | 4 KB |
-| Patch or file-change evidence | 4 KB |
-| Display evidence excerpt | 800 bytes |
+| Content                       |   Maximum |
+| ----------------------------- | --------: |
+| Message                       |      8 KB |
+| Tool input                    |      4 KB |
+| Tool output                   |      4 KB |
+| Patch or file-change evidence |      4 KB |
+| Display evidence excerpt      | 800 bytes |
 
 Raw transcript payloads are not stored. The database contains bounded redacted
 search text, evidence excerpts, hashes of redacted text, normalized metadata,
@@ -250,6 +247,53 @@ and Codex state databases are not read.
 pnpm typecheck
 pnpm test
 ```
+
+Format reviewable source and test files with `pnpm format`; CI-style checking is
+available as `pnpm format:check`.
+
+## Local UI and correction API
+
+The UI server binds only to `127.0.0.1` and is read-only by default:
+
+```sh
+pnpm ui -- --db ~/.worktrail/worktrail.db
+```
+
+Explicitly enable correction endpoints with:
+
+```sh
+pnpm ui -- --db ~/.worktrail/worktrail.db --allow-write
+```
+
+In write mode, `GET /api/bootstrap` supplies a per-process token to the
+same-origin local UI. Every mutation also requires a matching `Origin` header
+and `X-Worktrail-Write-Token` header. The status response reports
+`writesEnabled` but never includes the token. The correction UI is intentionally
+not implemented yet.
+
+Correction contracts:
+
+- `POST /api/workstreams` with `{ "name": "Release work" }`
+- `PATCH /api/workstreams/:id` with `{ "name": "New name" }`
+- `POST /api/workstreams/:id/aliases` with `{ "alias": "release" }`
+- `DELETE /api/workstreams/:id/aliases/:alias`
+- `POST /api/threads/:threadId/assignment` with `{ "workstreamId": "ws_..." }`
+- `DELETE /api/threads/:threadId/assignment`
+- `POST /api/threads/:threadId/ignore` with optional `{ "reason": "..." }`
+- `DELETE /api/threads/:threadId/ignore`
+
+For example, after obtaining `writeToken` from `/api/bootstrap`:
+
+```sh
+curl -X POST http://127.0.0.1:4173/api/workstreams \
+  -H 'Content-Type: application/json' \
+  -H 'Origin: http://127.0.0.1:4173' \
+  -H "X-Worktrail-Write-Token: $TOKEN" \
+  --data '{"name":"Release work"}'
+```
+
+These APIs update only Worktrail's correction tables and index. They never edit
+Codex rollout/source files. Merge remains CLI-only because it has no undo.
 
 Tests use only synthetic fixtures under `fixtures/codex/`.
 

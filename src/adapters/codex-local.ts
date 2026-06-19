@@ -55,7 +55,9 @@ export class CodexLocalAdapter implements SourceAdapter {
     this.codexHome = resolve(
       options.codexHome ?? process.env.CODEX_HOME ?? join(homedir(), ".codex"),
     );
-    this.fixtureDir = options.fixtureDir ? resolve(options.fixtureDir) : undefined;
+    this.fixtureDir = options.fixtureDir
+      ? resolve(options.fixtureDir)
+      : undefined;
     this.titleIndexPath = resolve(
       options.titleIndexPath ??
         (this.fixtureDir
@@ -64,7 +66,9 @@ export class CodexLocalAdapter implements SourceAdapter {
     );
   }
 
-  async *discover(options: DiscoveryOptions = {}): AsyncIterable<DiscoveredSource> {
+  async *discover(
+    options: DiscoveryOptions = {},
+  ): AsyncIterable<DiscoveredSource> {
     const candidates = this.fixtureDir
       ? (await collectJsonl(this.fixtureDir)).filter((path) =>
           basename(path).startsWith("rollout-"),
@@ -123,7 +127,10 @@ export class CodexLocalAdapter implements SourceAdapter {
   ): AsyncIterable<NormalizedSourceEvent> {
     const trailingNewline = await hasTrailingNewline(source.sourceUri);
     const input = createReadStream(source.sourceUri, { encoding: "utf8" });
-    const lines = createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY });
+    const lines = createInterface({
+      input,
+      crlfDelay: Number.POSITIVE_INFINITY,
+    });
     const state: ParserState = {
       ...(source.externalId ? { sessionId: source.externalId } : {}),
       recentMessages: new Map(),
@@ -158,7 +165,10 @@ export class CodexLocalAdapter implements SourceAdapter {
     }
 
     input.on("error", () => undefined);
-    const lines = createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY });
+    const lines = createInterface({
+      input,
+      crlfDelay: Number.POSITIVE_INFINITY,
+    });
 
     try {
       for await (const line of lines) {
@@ -173,7 +183,8 @@ export class CodexLocalAdapter implements SourceAdapter {
         const externalId = stringValue(parsed.id);
         const title = stringValue(parsed.thread_name);
         const updatedAt = stringValue(parsed.updated_at);
-        if (!externalId || !title || !updatedAt || !wanted.has(externalId)) continue;
+        if (!externalId || !title || !updatedAt || !wanted.has(externalId))
+          continue;
 
         const previous = newest.get(externalId);
         if (!previous?.updatedAt || updatedAt > previous.updatedAt) {
@@ -329,8 +340,14 @@ function* normalizeResponseItem(
   if (payloadType === "message") {
     const role = stringValue(payload.role);
     if (!role || !MESSAGE_ROLES.has(role)) return;
-    const text = valueToText(payload.content, TEXT_LIMITS.adapterExtraction).trim();
-    if (!text || isRecentMirror(state, role, text, evidence.recordLine, occurredAt)) {
+    const text = valueToText(
+      payload.content,
+      TEXT_LIMITS.adapterExtraction,
+    ).trim();
+    if (
+      !text ||
+      isRecentMirror(state, role, text, evidence.recordLine, occurredAt)
+    ) {
       return;
     }
     const phase = stringValue(payload.phase);
@@ -349,7 +366,10 @@ function* normalizeResponseItem(
     const tool = stringValue(payload.name) ?? stringValue(payload.namespace);
     if (!callId || !tool) return;
     const inputValue = payload.arguments ?? payload.input;
-    const inputText = valueToText(inputValue, TEXT_LIMITS.adapterExtraction).trim();
+    const inputText = valueToText(
+      inputValue,
+      TEXT_LIMITS.adapterExtraction,
+    ).trim();
     yield {
       ...common,
       kind: "tool-call",
@@ -367,7 +387,10 @@ function* normalizeResponseItem(
   ) {
     const callId = stringValue(payload.call_id);
     if (!callId) return;
-    const outputText = valueToText(payload.output, TEXT_LIMITS.adapterExtraction).trim();
+    const outputText = valueToText(
+      payload.output,
+      TEXT_LIMITS.adapterExtraction,
+    ).trim();
     const success = booleanValue(payload.success);
     yield {
       ...common,
@@ -392,7 +415,10 @@ function* normalizeEventMessage(
   if (payloadType === "user_message" || payloadType === "agent_message") {
     const role = payloadType === "user_message" ? "user" : "assistant";
     const text = stringValue(payload.message)?.trim();
-    if (!text || isRecentMirror(state, role, text, evidence.recordLine, occurredAt)) {
+    if (
+      !text ||
+      isRecentMirror(state, role, text, evidence.recordLine, occurredAt)
+    ) {
       return;
     }
     yield { ...common, kind: "message", role, text };

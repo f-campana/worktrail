@@ -51,7 +51,8 @@ export function insertSyntheticThread(
       Number(thread.archived ?? false),
     ) as { id: number };
 
-  const evidenceValues = thread.evidence.length > 0 ? thread.evidence : [thread.title];
+  const evidenceValues =
+    thread.evidence.length > 0 ? thread.evidence : [thread.title];
   let lastEventId: number | undefined;
   for (const [index, excerpt] of evidenceValues.entries()) {
     const event = database.raw

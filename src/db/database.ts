@@ -6,7 +6,10 @@ const MIGRATIONS = [
   {
     version: 1,
     name: "initial",
-    sql: readFileSync(new URL("./migrations/001_initial.sql", import.meta.url), "utf8"),
+    sql: readFileSync(
+      new URL("./migrations/001_initial.sql", import.meta.url),
+      "utf8",
+    ),
   },
   {
     version: 2,
@@ -80,7 +83,9 @@ export class WorktrailDatabase {
   rebuildSearchDocument(threadId: number): void {
     const thread = this.raw
       .prepare("SELECT title, cwd FROM source_threads WHERE id = ?")
-      .get(threadId) as { title: string | null; cwd: string | null } | undefined;
+      .get(threadId) as
+      | { title: string | null; cwd: string | null }
+      | undefined;
     if (!thread) return;
 
     const messageRows = this.raw
@@ -94,7 +99,9 @@ export class WorktrailDatabase {
       )
       .all(threadId) as Array<{ searchable_text: string }>;
     const fileRows = this.raw
-      .prepare("SELECT DISTINCT path FROM file_references WHERE thread_id = ? ORDER BY path")
+      .prepare(
+        "SELECT DISTINCT path FROM file_references WHERE thread_id = ? ORDER BY path",
+      )
       .all(threadId) as Array<{ path: string }>;
 
     const searchableText = [...messageRows, ...evidenceRows]
@@ -133,7 +140,9 @@ export class WorktrailDatabase {
 
     const applied = new Set(
       (
-        this.raw.prepare("SELECT version FROM schema_migrations").all() as Array<{
+        this.raw
+          .prepare("SELECT version FROM schema_migrations")
+          .all() as Array<{
           version: number;
         }>
       ).map((row) => row.version),

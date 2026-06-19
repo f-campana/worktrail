@@ -56,7 +56,8 @@ const replacements: Replacement[] = [
     replace: (_match: string, name: string) => `${name}=[REDACTED]`,
   },
   {
-    pattern: /\b(api[_-]?key|access[_-]?token|auth[_-]?token|secret)\s*[:=]\s*([^\s,;]+)/gi,
+    pattern:
+      /\b(api[_-]?key|access[_-]?token|auth[_-]?token|secret)\s*[:=]\s*([^\s,;]+)/gi,
     replace: (_match: string, name: string) => `${name}=[REDACTED]`,
   },
 ];

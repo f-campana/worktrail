@@ -4,7 +4,9 @@ export function normalizeRelatedFiles(
   paths: readonly string[],
   cwds: readonly (string | null | undefined)[],
 ): string[] {
-  const normalizedCwds = [...new Set(cwds.filter((cwd): cwd is string => Boolean(cwd)))]
+  const normalizedCwds = [
+    ...new Set(cwds.filter((cwd): cwd is string => Boolean(cwd))),
+  ]
     .map(normalizePath)
     .sort((left, right) => right.length - left.length);
   const selected = new Map<string, string>();
@@ -31,12 +33,22 @@ function repoRelativePath(path: string, cwds: string[]): string {
 }
 
 function normalizePath(path: string): string {
-  const slashes = path.trim().replaceAll("\\", "/").replace(/\/{2,}/g, "/");
+  const slashes = path
+    .trim()
+    .replaceAll("\\", "/")
+    .replace(/\/{2,}/g, "/");
   if (!slashes) return "";
-  const homePrefix = slashes.startsWith("~/") ? "~/" : slashes.startsWith("/") ? "/" : "";
+  const homePrefix = slashes.startsWith("~/")
+    ? "~/"
+    : slashes.startsWith("/")
+      ? "/"
+      : "";
   const body = homePrefix ? slashes.slice(homePrefix.length) : slashes;
   const normalizedBody = posix.normalize(body);
-  return `${homePrefix}${normalizedBody === "." ? "" : normalizedBody}`.replace(/\/$/, "");
+  return `${homePrefix}${normalizedBody === "." ? "" : normalizedBody}`.replace(
+    /\/$/,
+    "",
+  );
 }
 
 function stripLeadingDot(path: string): string {

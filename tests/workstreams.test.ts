@@ -58,7 +58,9 @@ test("existing version-one database migrates to workstream schema", async () => 
         1,
       );
       assert.equal(
-        migrated.scalar("SELECT count(*) FROM schema_migrations WHERE version = 3"),
+        migrated.scalar(
+          "SELECT count(*) FROM schema_migrations WHERE version = 3",
+        ),
         1,
       );
     } finally {
@@ -75,8 +77,14 @@ test("add, list, and remove workstream aliases", async () => {
     const added = addWorkstreamAlias(database, workstream.id, "widget repair");
     assert.equal(added.alias, "widget repair");
     assert.deepEqual(listWorkstreamAliases(database, workstream.id), [added]);
-    assert.equal(removeWorkstreamAlias(database, workstream.id, "widget repair"), true);
-    assert.equal(removeWorkstreamAlias(database, workstream.id, "widget repair"), false);
+    assert.equal(
+      removeWorkstreamAlias(database, workstream.id, "widget repair"),
+      true,
+    );
+    assert.equal(
+      removeWorkstreamAlias(database, workstream.id, "widget repair"),
+      false,
+    );
     assert.deepEqual(listWorkstreamAliases(database, workstream.id), []);
   });
 });
@@ -87,7 +95,11 @@ test("create, rename, and list workstreams", async () => {
     assert.match(created.id, /^ws_[0-9a-f-]+$/);
     assert.equal(created.name, "Fixture widget work");
 
-    const renamed = renameWorkstream(database, created.id, "Renamed fixture work");
+    const renamed = renameWorkstream(
+      database,
+      created.id,
+      "Renamed fixture work",
+    );
     assert.equal(renamed.name, "Renamed fixture work");
     assert.deepEqual(listWorkstreams(database), [renamed]);
     assert.equal(database.scalar("SELECT count(*) FROM manual_corrections"), 2);
@@ -126,7 +138,10 @@ test("manual assignment wins over deterministic candidate grouping", async () =>
 
 test("ignore removes a thread from search and state; unignore restores it", async () => {
   await withFixtureDatabase((database) => {
-    assert.equal(searchThreads(database, "widget validation")[0]?.externalId, currentThread);
+    assert.equal(
+      searchThreads(database, "widget validation")[0]?.externalId,
+      currentThread,
+    );
 
     ignoreThread(database, currentThread, "Synthetic irrelevant result");
     assert.equal(isThreadIgnored(database, currentThread), true);
@@ -137,7 +152,10 @@ test("ignore removes a thread from search and state; unignore restores it", asyn
       false,
     );
     assert.equal(
-      buildStateResponse(database, "widget validation").best?.relatedThreads.some(
+      buildStateResponse(
+        database,
+        "widget validation",
+      ).best?.relatedThreads.some(
         (thread) => thread.externalId === currentThread,
       ),
       false,
@@ -145,7 +163,10 @@ test("ignore removes a thread from search and state; unignore restores it", asyn
 
     assert.equal(unignoreThread(database, currentThread), true);
     assert.equal(isThreadIgnored(database, currentThread), false);
-    assert.equal(searchThreads(database, "widget validation")[0]?.externalId, currentThread);
+    assert.equal(
+      searchThreads(database, "widget validation")[0]?.externalId,
+      currentThread,
+    );
   });
 });
 
@@ -155,7 +176,9 @@ test("state card returns latest evidence and related files", async () => {
     assert.ok(state.best);
     assert.equal(state.best.bestThread.externalId, currentThread);
     assert.ok(state.best.latestEvidence.length > 0);
-    assert.ok(state.best.latestEvidence.some((item) => /validation/.test(item.excerpt)));
+    assert.ok(
+      state.best.latestEvidence.some((item) => /validation/.test(item.excerpt)),
+    );
     assert.ok(state.best.relatedFiles.includes("src/widget.ts"));
 
     for (let index = 1; index < state.best.latestEvidence.length; index += 1) {
@@ -217,18 +240,19 @@ test("state JSON has a stable top-level and card shape", async () => {
       "signals",
       "workstream",
     ]);
-    assert.deepEqual(Object.keys(best.workstream as Record<string, unknown>).sort(), [
-      "id",
-      "name",
-      "origin",
-    ]);
+    assert.deepEqual(
+      Object.keys(best.workstream as Record<string, unknown>).sort(),
+      ["id", "name", "origin"],
+    );
   });
 });
 
 async function withEmptyDatabase(
   operation: (database: WorktrailDatabase) => void | Promise<void>,
 ): Promise<void> {
-  const temporary = await mkdtemp(join(tmpdir(), "worktrail-workstreams-empty-"));
+  const temporary = await mkdtemp(
+    join(tmpdir(), "worktrail-workstreams-empty-"),
+  );
   const database = new WorktrailDatabase(join(temporary, "worktrail.db"));
   try {
     await operation(database);

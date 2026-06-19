@@ -72,7 +72,9 @@ async function main(): Promise<void> {
 async function runIndex(args: ParsedArgs): Promise<void> {
   const fixtures = args.flags.has("fixtures");
   const dbPath = databasePath(args, fixtures);
-  const fixtureDir = resolve(stringFlag(args, "fixture-dir") ?? "fixtures/codex");
+  const fixtureDir = resolve(
+    stringFlag(args, "fixture-dir") ?? "fixtures/codex",
+  );
   const codexHome = stringFlag(args, "codex-home");
   const maxSources = numberFlag(args, "max-sources");
   const since = stringFlag(args, "since");
@@ -192,7 +194,11 @@ function runWorkstreams(args: ParsedArgs): void {
     if (action === "alias") {
       const [aliasAction, identifier, ...aliasParts] = values;
       const alias = aliasParts.join(" ").trim();
-      if (!identifier || !alias || (aliasAction !== "add" && aliasAction !== "remove")) {
+      if (
+        !identifier ||
+        !alias ||
+        (aliasAction !== "add" && aliasAction !== "remove")
+      ) {
         throw new Error(
           "workstreams alias requires add/remove, WORKSTREAM_ID, and alias.",
         );
@@ -215,10 +221,13 @@ function runWorkstreams(args: ParsedArgs): void {
 
     if (action === "aliases") {
       const identifier = values[0];
-      if (!identifier) throw new Error("workstreams aliases requires WORKSTREAM_ID.");
+      if (!identifier)
+        throw new Error("workstreams aliases requires WORKSTREAM_ID.");
       const aliases = listWorkstreamAliases(database, identifier);
       if (args.flags.has("json")) {
-        console.log(JSON.stringify({ workstreamId: identifier, aliases }, null, 2));
+        console.log(
+          JSON.stringify({ workstreamId: identifier, aliases }, null, 2),
+        );
       } else if (aliases.length === 0) {
         console.log("No aliases configured.");
       } else {
@@ -252,7 +261,9 @@ function runWorkstreams(args: ParsedArgs): void {
 function runEval(args: ParsedArgs): void {
   const inputPath = args.positional[0];
   if (!inputPath) throw new Error("eval requires a query JSON file.");
-  const parsed = JSON.parse(readFileSync(resolve(inputPath), "utf8")) as unknown;
+  const parsed = JSON.parse(
+    readFileSync(resolve(inputPath), "utf8"),
+  ) as unknown;
   const queries = parseEvalQueries(parsed);
   const database = new WorktrailDatabase(
     databasePath(args, args.flags.has("fixtures")),
@@ -281,7 +292,9 @@ function runThreads(args: ParsedArgs): void {
   try {
     if (action === "assign") {
       if (!workstreamId) {
-        throw new Error("threads assign requires THREAD_UUID and WORKSTREAM_ID.");
+        throw new Error(
+          "threads assign requires THREAD_UUID and WORKSTREAM_ID.",
+        );
       }
       const assignment = assignThread(database, externalThreadId, workstreamId);
       printMutation(args, { action: "assigned", assignment });
@@ -289,7 +302,11 @@ function runThreads(args: ParsedArgs): void {
     }
     if (action === "unassign") {
       const changed = unassignThread(database, externalThreadId);
-      printMutation(args, { action: "unassigned", threadId: externalThreadId, changed });
+      printMutation(args, {
+        action: "unassigned",
+        threadId: externalThreadId,
+        changed,
+      });
       return;
     }
     if (action === "ignore") {
@@ -299,7 +316,11 @@ function runThreads(args: ParsedArgs): void {
     }
     if (action === "unignore") {
       const changed = unignoreThread(database, externalThreadId);
-      printMutation(args, { action: "unignored", threadId: externalThreadId, changed });
+      printMutation(args, {
+        action: "unignored",
+        threadId: externalThreadId,
+        changed,
+      });
       return;
     }
     throw new Error("threads requires assign, unassign, ignore, or unignore.");
@@ -329,7 +350,9 @@ function printResults(query: string, results: SearchResult[]): void {
   if (best.evidence.length > 0) {
     console.log("Evidence:");
     for (const item of best.evidence) {
-      console.log(`- [${item.kind}, line ${item.recordLine}] ${oneLine(item.excerpt)}`);
+      console.log(
+        `- [${item.kind}, line ${item.recordLine}] ${oneLine(item.excerpt)}`,
+      );
     }
   }
   if (best.fileReferences.length > 0) {
@@ -350,7 +373,11 @@ function printState(
   query: string,
   best: StateCard | null,
   alternates: Array<{
-    workstream: { id: string | null; name: string; origin: "manual" | "candidate" };
+    workstream: {
+      id: string | null;
+      name: string;
+      origin: "manual" | "candidate";
+    };
     score: number;
     confidence: "high" | "medium" | "low";
     signals: Array<{ type: string; weight: number; detail: string }>;
@@ -373,7 +400,9 @@ function printState(
   console.log(`Why: ${best.signals.map((signal) => signal.type).join(", ")}`);
   if (explain) {
     for (const signal of best.signals) {
-      console.log(`- ${signal.type} (${signal.weight.toFixed(2)}): ${signal.detail}`);
+      console.log(
+        `- ${signal.type} (${signal.weight.toFixed(2)}): ${signal.detail}`,
+      );
     }
   }
   console.log(`Latest activity: ${best.latestActivity}`);
@@ -437,7 +466,10 @@ function printEval(entries: EvalEntry[], withEvidence: boolean): void {
   }
 }
 
-function printMutation(args: ParsedArgs, payload: Record<string, unknown>): void {
+function printMutation(
+  args: ParsedArgs,
+  payload: Record<string, unknown>,
+): void {
   if (args.flags.has("json")) {
     console.log(JSON.stringify(payload, null, 2));
   } else {

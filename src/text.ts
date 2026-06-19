@@ -43,7 +43,8 @@ export function valueToText(value: unknown, extractionLimit: number): string {
       .map((item) => {
         if (typeof item === "string") return item;
         if (isObject(item) && typeof item.text === "string") return item.text;
-        if (isObject(item) && typeof item.content === "string") return item.content;
+        if (isObject(item) && typeof item.content === "string")
+          return item.content;
         return safeJson(item);
       })
       .filter(Boolean)
