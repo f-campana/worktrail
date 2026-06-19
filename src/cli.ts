@@ -148,6 +148,24 @@ export function formatHumanReport(report: DailyReport): string {
       `  Resume: codex resume ${run.resumeRef}`,
     );
   }
+  if (report.git?.repositories.length) {
+    lines.push("", "Git");
+    report.git.repositories.forEach((repository, index) => {
+      lines.push(
+        `${index + 1}. ${repository.displayRoot}`,
+        ...(repository.branch ? [`   Branch: ${repository.branch}`] : []),
+        ...(repository.head ? [`   HEAD: ${repository.head}`] : []),
+        `   Dirty: ${repository.dirty ? `yes (${repository.dirtyFileCount} files)` : "no"}`,
+        `   Commits in window: ${repository.commitsInWindow.length}${repository.commitsTruncated ? "+" : ""}`,
+      );
+      if (repository.changedFilesInWindow.length)
+        lines.push(
+          `   Files in window: ${repository.changedFilesInWindow.join(", ")}${repository.changedFilesTruncated ? ", …" : ""}`,
+        );
+      for (const diagnostic of repository.diagnostics)
+        lines.push(`   Diagnostic: ${diagnostic.message}`);
+    });
+  }
   lines.push(
     "",
     "Omitted",

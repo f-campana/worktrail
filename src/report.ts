@@ -1,5 +1,10 @@
 import { normalizeRelatedFiles } from "./files.js";
 import type { WorktrailDatabase } from "./db/database.js";
+import {
+  collectGitSignals,
+  type GitSignals,
+  type GitSignalOptions,
+} from "./git.js";
 
 export const DAILY_REPORT_SCHEMA_VERSION = 1 as const;
 
@@ -34,6 +39,7 @@ export type DailyReport = {
   };
   activeWorkstreams: DailyReportWorkstream[];
   unassignedRuns: DailyReportRun[];
+  git?: GitSignals;
   omitted: { ignoredRuns: number };
   limitations: string[];
 };
@@ -43,6 +49,7 @@ export type DailyReportOptions = {
   until: string | Date;
   timezone?: string;
   clock?: () => Date;
+  git?: Omit<GitSignalOptions, "since" | "until"> | false;
 };
 
 type RunRow = {
@@ -150,6 +157,14 @@ export function buildDailyReport(
         left.id.localeCompare(right.id),
     );
 
+  const git =
+    options.git === false
+      ? undefined
+      : collectGitSignals(
+          rows.map((row) => ({ sourceId: row.external_id, cwd: row.cwd })),
+          { since, until, ...options.git },
+        );
+
   return {
     schemaVersion: DAILY_REPORT_SCHEMA_VERSION,
     generatedAt,
@@ -161,6 +176,9 @@ export function buildDailyReport(
     },
     activeWorkstreams,
     unassignedRuns,
+    ...(git && (git.repositories.length > 0 || git.diagnostics.length > 0)
+      ? { git }
+      : {}),
     omitted: { ignoredRuns },
     limitations: [
       "Activity only; completion, blockage, review, and delivery status are not inferred.",

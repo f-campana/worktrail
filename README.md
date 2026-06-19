@@ -119,9 +119,28 @@ the requested display policy; report boundaries are absolute instants. `--json`
 prints the versioned `DailyReport` object directly.
 
 The report uses no model tokens or network calls and never includes evidence
-excerpts. It reports activity only: completion, blockage, review, and delivery
-status are not inferred, and Git, pull request, and Linear status are not yet
-available.
+excerpts. For runs whose indexed `cwd` resolves to a local Git repository, it
+also reports the repository root, current branch and short HEAD, dirty file
+count, and bounded commit/file lists for the requested window. Multiple runs in
+the same repository produce one Git entry linked by source IDs.
+
+```text
+Git
+1. ~/Documents/worktrail
+   Branch: feat/existing-data-daily-report
+   HEAD: 862012b
+   Dirty: no
+   Commits in window: 2
+   Files in window: README.md, src/cli.ts, tests/cli-report.test.ts
+```
+
+Git collection runs only argument-safe, read-only local commands with time and
+output limits. It does not inspect remotes, make network calls, include diffs,
+or infer pull requests, checks, reviews, GitHub, or Linear state. Missing and
+non-Git directories do not fail the report; bounded diagnostics indicate that
+signals were unavailable. Commit and file lists are capped and expose explicit
+truncation flags in JSON. The report still describes activity only: completion,
+blockage, review, and delivery status are not inferred.
 
 ## Workstream commands
 
