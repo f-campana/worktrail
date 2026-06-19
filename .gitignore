@@ -4,5 +4,7 @@ node_modules/
 *.db-shm
 *.db-wal
 coverage/
+test-results/
+playwright-report/
 ui/dist/
 .DS_Store

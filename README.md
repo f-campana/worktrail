@@ -16,6 +16,14 @@ Install dependencies:
 pnpm install
 ```
 
+Run unit/API tests and focused browser tests:
+
+```sh
+pnpm test
+pnpm exec playwright install chromium # first run only
+pnpm test:browser
+```
+
 ## Synthetic fixture workflow
 
 Index the committed synthetic fixtures:
