@@ -145,3 +145,48 @@ test("resume bounds limits and excludes archived runs by default", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("resume accepts UUIDv7 references without allowing unsafe commands", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "worktrail-resume-"));
+  const database = new WorktrailDatabase(join(directory, "worktrail.db"));
+  const uuidV7 = "01912345-6789-7abc-8def-0123456789ab";
+  const unsafeRef = "unsafe; echo exposed";
+  try {
+    insertSyntheticThread(database, {
+      externalId: uuidV7,
+      title: "Current resumable task",
+      cwd: "/repo",
+      updatedAt: "2026-06-20T12:00:00.000Z",
+      evidence: ["current resumable task"],
+      files: [],
+    });
+    insertSyntheticThread(database, {
+      externalId: unsafeRef,
+      title: "Unsafe resumable task",
+      cwd: "/repo",
+      updatedAt: "2026-06-19T12:00:00.000Z",
+      evidence: ["unsafe resumable task"],
+      files: [],
+    });
+
+    const current = findResumableTargets(database, {
+      query: "current",
+    });
+    assert.equal(current.targets[0]?.resumeCommand, `codex resume ${uuidV7}`);
+    assert.deepEqual(current.targets[0]?.command, {
+      program: "codex",
+      args: ["resume", uuidV7],
+    });
+    assert.equal(current.diagnostics.length, 0);
+
+    const unsafe = findResumableTargets(database, {
+      query: "unsafe",
+    });
+    assert.equal(unsafe.targets[0]?.resumeCommand, undefined);
+    assert.equal(unsafe.targets[0]?.openActions[0]?.kind, "copy-id");
+    assert.equal(unsafe.diagnostics[0]?.code, "unsafe-resume-ref");
+  } finally {
+    database.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
