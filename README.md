@@ -8,7 +8,10 @@ local web UI.
 Product vocabulary and the current Control Tower direction are documented in
 [`CONTEXT.md`](CONTEXT.md), the
 [`strategy digest`](docs/strategy/WORKTRAIL_CONVERSATION_DIGEST.md), and the
-[`daily report PRD`](docs/prd/control-tower-daily-report.md).
+[`daily report PRD`](docs/prd/control-tower-daily-report.md). The next product
+slice is specified in the [`Fast Resume PRD`](docs/prd/fast-resume.md) and
+[`ADR 0005`](docs/adr/0005-fast-resume-as-adoption-wedge.md); it is not yet
+implemented.
 
 ## Requirements
 

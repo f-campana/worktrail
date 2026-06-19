@@ -41,6 +41,18 @@ The CLI or launcher answers “Where did we leave X?” The GUI answers “What 
 
 The GUI becomes more valuable when organized around time and attention rather than another search box. Its central objects are a daily report and review queue composed from the same headless domain model used by other clients. Search remains useful as navigation, but it does not define the GUI.
 
+## Self-reflection update: Fast Resume as adoption wedge (2026-06-19)
+
+Dogfooding changed the next priority. Real reports contained many unassigned runs, no active canonical workstreams, resume references for every run, and no Git repositories resolved from indexed working directories. The report contract remained safe and useful, but a flat unassigned-run list did not create an actionable daily loop. More GUI presentation would expose the same missing primitive rather than fix it.
+
+The adoption wedge is therefore fast resume: `worktrail resume <query>` should return ranked, stable `ResumableTarget` JSON suitable for terminal and launcher clients. A resumable target can be a canonical workstream, a provisional candidate workstream, or an individual run. It carries the best safe resume action, confidence, explainable signals, related files and runs, and alternates. `resume` names the user's job more precisely than generic `search`.
+
+Workstreams should emerge primarily from source activity and links across Codex, Git, and later GitHub, Linear, and other agents. Users should not have to maintain Worktrail workstreams as a second source of truth. Candidate workstreams let Worktrail propose conservative groupings; corrections are feedback that stabilizes or rejects those inferences, not routine bookkeeping.
+
+The surface order remains CLI/core, launcher, then GUI. CLI provides the fastest scriptable contract. A Raycast-style launcher can turn that contract into a global shortcut and copyable `codex resume <SESSION_ID>` action. The GUI remains important as the Control Tower for reports, review, evidence inspection, and correction, but it is not the primary retrieval surface and should not expand before the resumable-target contract is proven.
+
+TypeScript remains the right implementation language for this phase: the work is still domain and product discovery around JSONL parsing, SQLite, CLI contracts, React/Vite, and future APIs. Rust may later suit a packaged local engine, indexing daemon, file watching, or demonstrated performance constraints. A rewrite now would delay learning without addressing the product gap.
+
 ## Daily report insight
 
 The baseline report must require no model tokens. Indexed activity and connector metadata can deterministically establish time windows, changed workstreams, resume points, dirty repositories, commits, PR/check states, and issue states as those sources become available. Optional LLM summarization may improve prose later, but correctness and availability cannot depend on it.
@@ -60,8 +72,8 @@ Raw rollouts remain source of truth. Worktrail stores bounded, redacted searchab
 
 ## Recommended next milestones
 
-1. Specify and implement a deterministic, headless report from existing indexed Codex/workstream data.
-2. expose the report through a versioned CLI JSON contract and dogfood its usefulness.
-3. Add one local Git tracer slice to test source-neutral report composition.
-4. Render that same report model in a minimal Control Tower page.
-5. Validate one end-to-end GitHub PR/check slice before expanding connector scope.
+1. Specify and implement `worktrail resume <query>` and a stable `ResumableTarget` JSON contract over existing indexed data.
+2. Dogfood ranking across canonical workstreams, conservative candidate workstreams, and unassigned runs using an evaluation corpus.
+3. Spike a thin Raycast/launcher client that consumes the public contract and never executes resume commands.
+4. Render the existing report model in a minimal Control Tower page.
+5. Add correction UI and remote connector enrichment only after observed workflows justify them.

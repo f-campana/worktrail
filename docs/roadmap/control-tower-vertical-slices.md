@@ -1,163 +1,79 @@
 # Control Tower Vertical Slices
 
-Each slice is independently demoable and should ship as a focused change. Later slices depend on lessons and contracts from earlier ones; naming a connector here is not authorization to implement it in this documentation task.
+Each slice is independently demoable and should ship as a focused change. Fast Resume is the adoption wedge; the GUI remains the Control Tower for sustained review. Future connectors enrich these contracts but are not prerequisites for retrieval.
 
-## 1. Existing-data daily report
+## 1. Existing-data daily report — done
 
-**Goal:** Prove useful daily orientation using only indexed Worktrail/Codex data.
+**Outcome:** A deterministic, no-token report returns active canonical workstreams and unassigned runs for an explicit window without evidence excerpts.
 
-**User-visible behavior:** Given a fixed time window, return active workstreams and unassigned runs with latest activity and resume references; ignored runs are absent.
+## 2. Stable `worktrail report --since` contract — done
 
-**Data/source changes:** Read existing tables only. Add no adapter or schema change.
+**Outcome:** Human output and versioned JSON make the report scriptable, with explicit boundaries, deterministic ordering, and safe resume references.
 
-**CLI/API/UI impact:** Public headless report builder only, exercised by a small development harness or tests; no new product command yet.
+## 3. Read-only local Git signals — done
 
-**Tests:** Fixed clock/time-zone boundaries, empty report, manual and candidate organization, merge redirect, ignored runs, deterministic ordering, evidence omitted from baseline.
+**Outcome:** Reports are optionally enriched from indexed working directories using bounded, argument-safe local Git reads. Missing repositories degrade to diagnostics.
 
-**Out of scope:** Git signals, generated prose, GUI, scheduling, persistence of reports.
+## 4. Fast Resume CLI and `ResumableTarget` JSON contract
 
-**Acceptance criteria:** The same database, window, and clock produce byte-equivalent structured output; every item has source IDs and a resume reference where available; no token/network use occurs.
+**Goal:** Turn remembered context and unassigned runs into ranked, actionable resume choices.
 
-## 2. Stable `worktrail report --since` contract
+**Behavior:** `worktrail resume <query>` returns the best canonical workstream, conservative candidate workstream, or run. Human output includes a copyable `codex resume <SESSION_ID>` command; versioned JSON exposes confidence, signals, related runs/files, actions, and alternates.
 
-**Goal:** Make the report a scriptable product capability.
+**Tests and acceptance:** Use an evaluation corpus for ordering, ambiguity, over-grouping negatives, ignored records, escaping, privacy, and no execution/network behavior. Candidate grouping remains provisional and the contract is suitable for a thin launcher. No schema, adapter, model, or GUI dependency is required by default.
 
-**User-visible behavior:** `worktrail report --since <ISO>` prints concise human output; `--json` returns a documented, versioned contract with explicit window metadata.
+## 5. Raycast/launcher spike over `ResumableTarget`
 
-**Data/source changes:** None beyond slice 1.
+**Goal:** Validate the global-shortcut retrieval loop without duplicating domain logic.
 
-**CLI/API/UI impact:** Add CLI parsing and serialization over the public report builder; no report logic in `cli.ts`.
+**Behavior:** Type remembered context, select a ranked target, copy its resume command or ID, and optionally open declared detail.
 
-**Tests:** CLI success/error behavior, ISO validation, golden JSON, human smoke output, exit status, no evidence leakage.
+**Tests and acceptance:** Cover contract fixtures, no-result/error states, safe copying, and no automatic execution. The launcher contains no ranking, grouping, connector, or mutation logic.
 
-**Out of scope:** HTTP endpoint, launcher, aliases for flags, scheduled execution.
+## 6. GUI Daily Report page
 
-**Acceptance criteria:** Output is stable for fixtures; invalid time input fails clearly; JSON includes a schema version; existing commands remain unchanged.
+**Goal:** Advance the GUI's Control Tower role using the existing headless report model.
 
-## 3. Local Git signal for one linked workstream
+**Behavior:** A read-only local route shows the report window, activity groups, resume actions, empty/error states, and detail drill-down. It supports daily review rather than replacing fast retrieval.
 
-**Goal:** Demonstrate source-neutral report enrichment with local repository facts.
+**Tests and acceptance:** Verify API parity, browser rendering, keyboard navigation, deep links, and opt-in evidence. The GUI renders core ordering and requests no transcript content initially.
 
-**User-visible behavior:** One linked workstream shows current branch, commits in the window, and dirty/clean state with collection time.
+## 7. Triage/correction UI for unassigned runs and candidate workstreams
 
-**Data/source changes:** Add an isolated local Git adapter and an explicit, minimal workstream-repository link mechanism. Normalize command output; do not parse Git in report code.
+**Goal:** Let demonstrated corrections teach Worktrail without requiring users to maintain a second source of truth.
 
-**CLI/API/UI impact:** Report human/JSON output gains optional versioned Git facts.
+**Behavior:** Users can confirm, reject, assign, ignore, or reverse only high-frequency candidate/run corrections validated through dogfooding.
 
-**Tests:** Temporary repositories covering clean/dirty, detached HEAD, no commits, renamed paths, command failure, and repositories outside configured scope.
+**Tests and acceptance:** Reuse capability-gated APIs and audit semantics; preserve loopback-only, read-only-by-default, same-origin, token, conflict, persistence, and accessibility protections. Add no UI-owned organization state.
 
-**Out of scope:** Watching repositories, remote status, GitHub, automatic multi-repo inference.
+## 8. GitHub PR/check metadata adapter
 
-**Acceptance criteria:** The report remains usable when Git collection fails; adapter errors are bounded and attributable; one fixture workstream demonstrates the complete path.
+**Goal:** Add actionable delivery signals after local retrieval works.
 
-## 4. GUI Daily Report page
+**Behavior:** Linked results and reports can show bounded PR state, check summary, freshness, and source links.
 
-**Goal:** Validate the GUI's Control Tower role using the headless model.
+**Tests and acceptance:** Use least privilege, isolated normalization, recorded fixtures, bounded caching, redacted diagnostics, and graceful failure. GitHub types do not escape the adapter or break local results.
 
-**User-visible behavior:** A local route shows the report window, activity groups, resume actions, empty/error states, and drill-down to existing workstream detail.
+## 9. Workstream ↔ PR linking
 
-**Data/source changes:** None; use a read-only report endpoint backed by the core builder.
+**Goal:** Make PR association evidence-backed, explicit, and correctable.
 
-**CLI/API/UI impact:** Add versioned HTTP serialization and one React route. Keep existing search/detail routes.
+**Behavior:** A user can accept, link, unlink, or correct an association; suggestions remain visibly non-canonical until accepted.
 
-**Tests:** API parity, browser rendering, deep link/history, loading/error/empty states, keyboard navigation, evidence remains opt-in.
+**Tests and acceptance:** After separate schema review, cover idempotency, relinking, redirects, unknown IDs, and propagation. Links remain reversible and deterministically control enrichment.
 
-**Out of scope:** Correction controls, charts, generated narrative, broad visual redesign.
+## 10. Linear issue metadata adapter
 
-**Acceptance criteria:** Browser fixtures render the same items and ordering as core JSON; no component reads connector-specific shapes; no transcript request occurs on initial load.
+**Goal:** Test issue metadata using established connector and entity-link boundaries.
 
-## 5. GitHub PR/check status for one workstream
+**Behavior:** A linked result can show issue identifier, title, state, assignee when available, freshness, and source link.
 
-**Goal:** Show actionable delivery state without building a general GitHub dashboard.
+**Tests and acceptance:** Cover missing issues, permissions, stale data, and local fallback. Linear data remains optional and source-neutral.
 
-**User-visible behavior:** A linked workstream report item shows one PR's state and latest check summary, timestamp, and source link.
+## 11. Report scheduling/export
 
-**Data/source changes:** Add a least-privilege GitHub metadata adapter and bounded cache/refresh policy reviewed separately.
+**Goal:** Deliver deterministic reports at a useful local cadence without cloud infrastructure.
 
-**CLI/API/UI impact:** Optional PR/check facts appear consistently in report JSON, human CLI, and GUI detail.
+**Behavior:** Users explicitly configure, inspect, and remove local generation/export with visible last-run status.
 
-**Tests:** Recorded contract fixtures for open/merged/closed PRs, pending/failing/passing checks, missing permissions, rate limits, stale cache, and redacted diagnostics.
-
-**Out of scope:** PR creation, review submission, comments, repository-wide dashboard.
-
-**Acceptance criteria:** One linked workstream demonstrates end to end; auth or network failure does not suppress local report facts; source freshness is visible.
-
-## 6. Workstream-to-PR linking
-
-**Goal:** Make PR association explicit and correctable.
-
-**User-visible behavior:** A user can link/unlink a PR to a workstream and subsequent reports use that association; any suggestion is visibly non-canonical until accepted.
-
-**Data/source changes:** Add the smallest auditable link representation and correction history required by the accepted design.
-
-**CLI/API/UI impact:** CLI-first mutation and read contract; GUI may display the link but does not need editing controls.
-
-**Tests:** Idempotency, relinking, merge redirect behavior, unknown identifiers, authorization, and report propagation.
-
-**Out of scope:** Bulk inference, automatic mutation, linking issues.
-
-**Acceptance criteria:** A link survives reindex/refresh, is reversible, and deterministically controls which PR facts appear for the workstream.
-
-## 7. Linear issue state for one linked workstream
-
-**Goal:** Test whether issue state adds useful planning context to the same report model.
-
-**User-visible behavior:** One workstream shows a linked Linear issue's identifier, title, state, assignee when available, and freshness.
-
-**Data/source changes:** Add isolated Linear metadata normalization and an explicit link using the connector boundary established by GitHub.
-
-**CLI/API/UI impact:** Optional issue facts in core JSON, CLI, and GUI report item.
-
-**Tests:** API contract fixtures, missing/deleted issues, permission failure, state changes, stale data, and local report fallback.
-
-**Out of scope:** Issue mutation, projects/cycles dashboard, automatic synchronization.
-
-**Acceptance criteria:** One linked issue renders end to end without Linear types escaping the adapter; unavailable Linear data cannot break Codex/Git reporting.
-
-## 8. Raycast command spike
-
-**Goal:** Validate the keyboard-first retrieval surface before committing to packaging.
-
-**User-visible behavior:** Type remembered text, see the top workstream/run, copy a Codex resume command, or open its local GUI detail.
-
-**Data/source changes:** None; consume stable CLI JSON or a documented local API.
-
-**CLI/API/UI impact:** Thin spike only; any missing core behavior is fixed in core rather than duplicated.
-
-**Tests:** Contract fixture, escaping of copied commands, no-result/error state, local server unavailable behavior, and no automatic execution.
-
-**Out of scope:** Marketplace publication, background indexing, report browsing, mutations.
-
-**Acceptance criteria:** The spike completes the lookup-to-copy flow using public contracts and contains no ranking or connector logic.
-
-## 9. Report scheduling and export
-
-**Goal:** Deliver the deterministic report at a useful cadence without adding cloud infrastructure.
-
-**User-visible behavior:** A user can explicitly configure local generation and export to a documented local format, with visible last-run status.
-
-**Data/source changes:** Store minimal local schedule/export configuration and generated artifact metadata only if required.
-
-**CLI/API/UI impact:** Explicit setup/status/remove operations over an OS-appropriate scheduling boundary; exporter consumes the same report model.
-
-**Tests:** Idempotent setup/removal, time-zone/DST cases, missed run, atomic export, permissions, and no-token/network baseline.
-
-**Out of scope:** Hosted scheduler, email/Slack delivery, automatic connector credential setup.
-
-**Acceptance criteria:** A scheduled fixture report is reproducible and locally inspectable; disabling removes Worktrail-owned scheduling state cleanly; failures are reported without transcript content.
-
-## 10. Correction UI, if dogfooding warrants it
-
-**Goal:** Put only demonstrated high-frequency corrections into the Control Tower.
-
-**User-visible behavior:** Users can perform the selected correction with confirmation, see its effect immediately, and reverse it when the domain operation supports reversal.
-
-**Data/source changes:** Reuse existing correction functions/APIs or separately accepted link corrections; add no duplicate UI-owned state.
-
-**CLI/API/UI impact:** React controls consume capability-gated APIs; server remains loopback-only, read-only by default, same-origin checked, and token protected.
-
-**Tests:** Browser happy/error/conflict paths, disabled mode, invalid/missing token, refresh persistence, keyboard accessibility, and unchanged evidence policy.
-
-**Out of scope:** Implementing every CLI correction, enabling writes by default, redesigning correction semantics.
-
-**Acceptance criteria:** Dogfooding evidence identifies the chosen workflow; all write-safety invariants remain covered; report and CLI reflect the correction through shared core state.
+**Tests and acceptance:** Cover idempotency, time zones/DST, missed runs, atomic export, permissions, and transcript-free errors. Disabling removes Worktrail-owned scheduling state cleanly.

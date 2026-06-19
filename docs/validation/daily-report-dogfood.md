@@ -40,11 +40,14 @@ non-Git working directories, but there was no repository context to act on.
 
 Local Git signals improve the report when indexed runs contain a valid local
 repository working directory, as covered by synthetic integration tests. This
-real dataset did not demonstrate that benefit. Missing today are curated
-assignments and a faster way to scan and correct the report's grouping.
+real dataset did not demonstrate that benefit. Missing today is a ranked way to
+turn unassigned runs into resumable targets and, where evidence is strong,
+provisional candidate workstreams. Manual assignments should teach Worktrail
+rather than become required daily curation.
 
-The next vertical slice should be a read-only GUI report page before a GitHub
-adapter. The local contract and privacy boundary should first be exercised in a
-scannable interface; adding remote status now would increase signal volume
-without addressing the unassigned-run bottleneck. Correction interactions can
-remain a separate, explicitly authorized follow-up.
+The next vertical slice should be Fast Resume CLI and a stable
+`ResumableTarget` JSON contract, followed by a thin launcher spike. That directly
+addresses the unassigned-run bottleneck without adding remote signal volume.
+The read-only GUI report remains the Control Tower follow-up; correction
+interactions remain separate and should focus on teaching Worktrail from
+observed grouping failures.
