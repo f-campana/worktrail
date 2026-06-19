@@ -1,0 +1,32 @@
+{
+  "name": "worktrail",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "worktrail": "tsx src/cli.ts",
+    "test": "NODE_NO_WARNINGS=1 tsx --test tests/**/*.test.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p ui/tsconfig.json",
+    "ui": "tsx src/server.ts",
+    "ui:dev": "concurrently -k \"tsx watch src/server.ts\" \"vite --config ui/vite.config.ts\"",
+    "ui:build": "vite build --config ui/vite.config.ts"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.5.2",
+    "vite": "^6.3.5",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "concurrently": "^9.1.2",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}

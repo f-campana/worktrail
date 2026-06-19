@@ -1,0 +1,8 @@
+node_modules/
+.worktrail/
+*.db
+*.db-shm
+*.db-wal
+coverage/
+ui/dist/
+.DS_Store
