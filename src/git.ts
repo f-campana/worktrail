@@ -11,7 +11,6 @@ export type GitDiagnostic = { code: string; message: string };
 
 export type GitRepositorySignal = {
   root: string;
-  displayRoot: string;
   branch?: string;
   head?: string;
   dirty: boolean;
@@ -138,8 +137,7 @@ function collectRepository(
   const branch = branchResult.ok ? branchResult.stdout.trim() : undefined;
   const head = headResult.ok ? headResult.stdout.trim() : undefined;
   return {
-    root,
-    displayRoot: displayPath(root),
+    root: displayPath(root),
     ...(branch && branch !== "HEAD" ? { branch } : {}),
     ...(head ? { head } : {}),
     dirty: statusEntries.length > 0,

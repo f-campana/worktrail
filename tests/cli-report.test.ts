@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
@@ -89,6 +89,7 @@ test("report CLI emits stable JSON and compact evidence-free human output", asyn
     assert.equal(report.omitted.ignoredRuns, 1);
     assert.equal(report.git.repositories[0].branch, "report-test");
     assert.equal(report.git.repositories[0].commitsInWindow.length, 1);
+    assert.equal(jsonText.includes(homedir()), false);
     assert.equal(jsonText.includes("private transcript phrase"), false);
 
     const human = execFileSync(cli, common, { encoding: "utf8" });

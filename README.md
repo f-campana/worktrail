@@ -124,6 +124,11 @@ also reports the repository root, current branch and short HEAD, dirty file
 count, and bounded commit/file lists for the requested window. Multiple runs in
 the same repository produce one Git entry linked by source IDs.
 
+In both human and JSON output, `git.repositories[].root` is home-normalized
+(for example, `~/Documents/worktrail`). Raw absolute roots are used only
+internally as Git command working directories and are not part of the report
+contract.
+
 ```text
 Git
 1. ~/Documents/worktrail

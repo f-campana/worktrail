@@ -152,7 +152,7 @@ export function formatHumanReport(report: DailyReport): string {
     lines.push("", "Git");
     report.git.repositories.forEach((repository, index) => {
       lines.push(
-        `${index + 1}. ${repository.displayRoot}`,
+        `${index + 1}. ${repository.root}`,
         ...(repository.branch ? [`   Branch: ${repository.branch}`] : []),
         ...(repository.head ? [`   HEAD: ${repository.head}`] : []),
         `   Dirty: ${repository.dirty ? `yes (${repository.dirtyFileCount} files)` : "no"}`,

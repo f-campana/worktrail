@@ -8,7 +8,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -71,6 +71,25 @@ test(
       );
       assert.deepEqual(repository.changedFilesInWindow, ["inside.txt"]);
       assert.equal(JSON.stringify(signals).includes("diff"), false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "Git signal JSON normalizes repository roots beneath the home directory",
+  { skip: !hasGit && "git is not installed" },
+  async () => {
+    const root = await mkdtemp(join(homedir(), "worktrail-git-privacy-"));
+    try {
+      git(root, ["init", "-b", "privacy-test"]);
+      const signals = collectGitSignals(
+        [{ sourceId: "run", cwd: root }],
+        window,
+      );
+      assert.match(signals.repositories[0]?.root ?? "", /^~\//);
+      assert.equal(JSON.stringify(signals).includes(homedir()), false);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
