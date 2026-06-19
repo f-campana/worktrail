@@ -9,9 +9,22 @@ Product vocabulary and the current Control Tower direction are documented in
 [`CONTEXT.md`](CONTEXT.md), the
 [`strategy digest`](docs/strategy/WORKTRAIL_CONVERSATION_DIGEST.md), and the
 [`daily report PRD`](docs/prd/control-tower-daily-report.md). The next product
-slice is specified in the [`Fast Resume PRD`](docs/prd/fast-resume.md) and
-[`ADR 0005`](docs/adr/0005-fast-resume-as-adoption-wedge.md); it is not yet
-implemented.
+Fast Resume slice is specified in the
+[`Fast Resume PRD`](docs/prd/fast-resume.md) and
+[`ADR 0005`](docs/adr/0005-fast-resume-as-adoption-wedge.md).
+
+## Fast Resume
+
+```sh
+pnpm worktrail resume "daily report"
+pnpm worktrail resume "control tower" --json
+pnpm worktrail resume "safe apply GUI" --limit 5 --db PATH
+```
+
+`resume` is task-oriented retrieval; `search` remains lower-level evidence
+search and `report` provides time-bounded orientation. Fast Resume returns
+explainable signals and inert, copyable command data but never executes Codex.
+Its JSON omits transcript excerpts, diffs, raw home paths, and credentials.
 
 ## Requirements
 

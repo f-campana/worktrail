@@ -10,6 +10,7 @@ import { evaluateQueries, parseEvalQueries, type EvalEntry } from "./eval.js";
 import { searchThreads, type SearchResult } from "./search.js";
 import { buildStateResponse, type StateCard } from "./state.js";
 import { buildDailyReport, type DailyReport } from "./report.js";
+import { findResumableTargets, type ResumeSearchResult } from "./resume.js";
 import {
   assignThread,
   addWorkstreamAlias,
@@ -57,6 +58,11 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (args.command === "resume") {
+    runResume(args);
+    return;
+  }
+
   if (args.command === "workstreams") {
     runWorkstreams(args);
     return;
@@ -73,6 +79,57 @@ async function main(): Promise<void> {
   }
 
   throw new Error(`Unknown command: ${args.command}`);
+}
+
+function runResume(args: ParsedArgs): void {
+  const query = args.positional.join(" ").trim();
+  if (!query) throw new Error("Resume requires a query.");
+  const database = new WorktrailDatabase(databasePath(args, false));
+  try {
+    const result = findResumableTargets(database, {
+      query,
+      limit: numberFlag(args, "limit") ?? 5,
+      includeArchived: args.flags.has("include-archived"),
+    });
+    console.log(
+      args.flags.has("json")
+        ? JSON.stringify(result, null, 2)
+        : formatHumanResume(result),
+    );
+  } finally {
+    database.close();
+  }
+}
+
+export function formatHumanResume(result: ResumeSearchResult): string {
+  const [best, ...alternates] = result.targets;
+  if (!best) return `No resumable work found for: ${result.query}`;
+  const lines = [
+    `Query: ${result.query}`,
+    "",
+    "Best resumable target",
+    `Title: ${best.title}`,
+    `Type: ${best.kind}`,
+    `Confidence: ${best.confidence}`,
+    `Last activity: ${best.lastActivity}`,
+    ...(best.sourceTool ? [`Source: ${best.sourceTool}`] : []),
+  ];
+  if (best.resumeCommand) lines.push("Resume:", `  ${best.resumeCommand}`);
+  lines.push(
+    "",
+    "Why this matched",
+    ...best.signals.map((signal) => `- ${signal.label}`),
+  );
+  for (const file of best.relatedFiles.slice(0, 3))
+    lines.push(`- Related file: ${file}`);
+  if (alternates.length) {
+    lines.push("", "Alternates");
+    alternates.forEach((target, index) => {
+      lines.push(`${index + 1}. ${target.title}`);
+      if (target.resumeCommand) lines.push(`   ${target.resumeCommand}`);
+    });
+  }
+  return lines.join("\n");
 }
 
 function runReport(args: ParsedArgs): void {
@@ -643,6 +700,7 @@ Usage:
   pnpm worktrail index --fixtures [--db PATH] [--force]
   pnpm worktrail index [--db PATH] [--codex-home PATH] [--max-sources N] [--since ISO_DATE]
   pnpm worktrail search "query" [--db PATH] [--limit N] [--json] [--include-ignored]
+  pnpm worktrail resume "query" [--db PATH] [--limit N] [--json] [--include-archived]
   pnpm worktrail state "query" [--db PATH] [--limit N] [--json] [--explain]
   pnpm worktrail report --since ISO_INSTANT [--until ISO_INSTANT] [--timezone TIMEZONE] [--db PATH] [--json]
   pnpm worktrail workstreams list [--db PATH] [--json]
