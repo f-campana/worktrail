@@ -5,6 +5,11 @@ The repository includes a Codex rollout importer, SQLite/FTS index, canonical
 workstreams, manual corrections, evidence-backed commands, and a read-only
 local web UI.
 
+Product vocabulary and the current Control Tower direction are documented in
+[`CONTEXT.md`](CONTEXT.md), the
+[`strategy digest`](docs/strategy/WORKTRAIL_CONVERSATION_DIGEST.md), and the
+[`daily report PRD`](docs/prd/control-tower-daily-report.md).
+
 ## Requirements
 
 - Node.js 22.5 or newer, with `node:sqlite`
