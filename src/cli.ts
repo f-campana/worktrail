@@ -9,6 +9,7 @@ import { importSources } from "./importer.js";
 import { evaluateQueries, parseEvalQueries, type EvalEntry } from "./eval.js";
 import { searchThreads, type SearchResult } from "./search.js";
 import { buildStateResponse, type StateCard } from "./state.js";
+import { buildDailyReport, type DailyReport } from "./report.js";
 import {
   assignThread,
   addWorkstreamAlias,
@@ -51,6 +52,11 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (args.command === "report") {
+    runReport(args);
+    return;
+  }
+
   if (args.command === "workstreams") {
     runWorkstreams(args);
     return;
@@ -67,6 +73,90 @@ async function main(): Promise<void> {
   }
 
   throw new Error(`Unknown command: ${args.command}`);
+}
+
+function runReport(args: ParsedArgs): void {
+  const since = reportInstantFlag(args, "since", true)!;
+  const until = reportInstantFlag(args, "until", false) ?? new Date();
+  const timezone = stringFlag(args, "timezone")?.trim() || "UTC";
+  const database = new WorktrailDatabase(databasePath(args, false));
+  try {
+    const report = buildDailyReport(database, { since, until, timezone });
+    console.log(
+      args.flags.has("json")
+        ? JSON.stringify(report, null, 2)
+        : formatHumanReport(report),
+    );
+  } finally {
+    database.close();
+  }
+}
+
+function reportInstantFlag(
+  args: ParsedArgs,
+  name: "since" | "until",
+  required: boolean,
+): Date | undefined {
+  const value = stringFlag(args, name);
+  if (!value) {
+    if (required) throw new Error("report requires --since <ISO_INSTANT>.");
+    return undefined;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) {
+    throw new Error(`--${name} must be a valid ISO instant.`);
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) {
+    throw new Error(`--${name} must be a valid ISO instant.`);
+  }
+  return date;
+}
+
+export function formatHumanReport(report: DailyReport): string {
+  const lines = [
+    "Worktrail Daily Report",
+    `Window: ${report.window.since} → ${report.window.until}`,
+    `Generated: ${report.generatedAt}`,
+    `Timezone policy: ${report.window.timezone}`,
+    "",
+  ];
+  const activityCount =
+    report.activeWorkstreams.length + report.unassignedRuns.length;
+  if (activityCount === 0) lines.push("No activity found.", "");
+
+  lines.push("Active workstreams");
+  if (report.activeWorkstreams.length === 0) lines.push("- None");
+  report.activeWorkstreams.forEach((workstream, index) => {
+    lines.push(
+      `${index + 1}. ${workstream.name}`,
+      `   Latest activity: ${workstream.latestActivity}`,
+      `   Runs: ${workstream.relatedRuns.length}`,
+    );
+    if (workstream.relatedFiles.length > 0)
+      lines.push(`   Files: ${workstream.relatedFiles.join(", ")}`);
+    lines.push("   Resume:");
+    for (const run of workstream.relatedRuns)
+      lines.push(`     codex resume ${run.resumeRef}`);
+  });
+
+  lines.push("", "Unassigned runs");
+  if (report.unassignedRuns.length === 0) lines.push("- None");
+  for (const run of report.unassignedRuns) {
+    lines.push(
+      `- ${run.title ?? run.sourceId}`,
+      `  Latest activity: ${run.lastActivity}`,
+      `  Resume: codex resume ${run.resumeRef}`,
+    );
+  }
+  lines.push(
+    "",
+    "Omitted",
+    `- Ignored runs: ${report.omitted.ignoredRuns}`,
+    "",
+    "Limitations",
+    ...report.limitations.map((limitation) => `- ${limitation}`),
+  );
+  return lines.join("\n");
 }
 
 async function runIndex(args: ParsedArgs): Promise<void> {
@@ -536,6 +626,7 @@ Usage:
   pnpm worktrail index [--db PATH] [--codex-home PATH] [--max-sources N] [--since ISO_DATE]
   pnpm worktrail search "query" [--db PATH] [--limit N] [--json] [--include-ignored]
   pnpm worktrail state "query" [--db PATH] [--limit N] [--json] [--explain]
+  pnpm worktrail report --since ISO_INSTANT [--until ISO_INSTANT] [--timezone TIMEZONE] [--db PATH] [--json]
   pnpm worktrail workstreams list [--db PATH] [--json]
   pnpm worktrail workstreams create "name" [--db PATH] [--json]
   pnpm worktrail workstreams rename WORKSTREAM_ID "name" [--db PATH] [--json]

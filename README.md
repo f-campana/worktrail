@@ -103,6 +103,26 @@ pnpm worktrail threads unignore \
 Use `--json` for machine-readable results. Fixture data is written to
 `.worktrail/fixtures.db`, which is ignored by Git.
 
+## Daily report
+
+Generate a compact report from already indexed activity:
+
+```sh
+pnpm worktrail report --since 2026-06-18T00:00:00Z
+pnpm worktrail report --since 2026-06-18T00:00:00Z \
+  --until 2026-06-19T00:00:00Z --timezone Europe/Paris --json
+```
+
+`--since` is required and accepts an explicit ISO instant. `--until` defaults
+to the current time, and `--timezone` defaults to `UTC`. The timezone records
+the requested display policy; report boundaries are absolute instants. `--json`
+prints the versioned `DailyReport` object directly.
+
+The report uses no model tokens or network calls and never includes evidence
+excerpts. It reports activity only: completion, blockage, review, and delivery
+status are not inferred, and Git, pull request, and Linear status are not yet
+available.
+
 ## Workstream commands
 
 ```sh
