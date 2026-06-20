@@ -3,3 +3,4 @@ docs/spikes/codex-source-availability.md
 pnpm-lock.yaml
 ui/tsconfig.json
 ui/dist/
+extensions/raycast/raycast-env.d.ts

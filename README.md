@@ -26,6 +26,10 @@ search and `report` provides time-bounded orientation. Fast Resume returns
 explainable signals and inert, copyable command data but never executes Codex.
 Its JSON omits transcript excerpts, diffs, raw home paths, and credentials.
 
+For a keyboard-first private launcher, the repository also includes a thin
+[Raycast extension](extensions/raycast/README.md). It delegates ranking to this
+CLI and only copies declared resume commands; it never executes Codex.
+
 ## Requirements
 
 - Node.js 22.5 or newer, with `node:sqlite`

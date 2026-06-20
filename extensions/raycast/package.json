@@ -1,0 +1,95 @@
+{
+  "name": "worktrail-raycast",
+  "title": "Worktrail",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Search Worktrail and copy inert Codex resume commands from Raycast.",
+  "icon": "icon.png",
+  "author": "fabiencampana",
+  "license": "MIT",
+  "platforms": [
+    "macOS"
+  ],
+  "categories": [
+    "Developer Tools",
+    "Productivity"
+  ],
+  "commands": [
+    {
+      "name": "resume-worktrail",
+      "title": "Resume Worktrail",
+      "subtitle": "Worktrail",
+      "description": "Search ranked Worktrail targets and copy a Codex resume command.",
+      "mode": "view",
+      "preferences": [
+        {
+          "name": "worktrailProjectPath",
+          "title": "Worktrail Project Path",
+          "description": "Repository containing the Worktrail pnpm script.",
+          "type": "directory",
+          "required": true
+        },
+        {
+          "name": "databasePath",
+          "title": "Database Path",
+          "description": "Optional Worktrail database passed through as --db.",
+          "type": "file",
+          "required": false
+        },
+        {
+          "name": "resultLimit",
+          "title": "Result Limit",
+          "description": "Maximum ranked targets requested from Worktrail.",
+          "type": "dropdown",
+          "required": true,
+          "default": "5",
+          "data": [
+            {
+              "title": "3",
+              "value": "3"
+            },
+            {
+              "title": "5",
+              "value": "5"
+            },
+            {
+              "title": "10",
+              "value": "10"
+            },
+            {
+              "title": "20",
+              "value": "20"
+            }
+          ]
+        },
+        {
+          "name": "includeArchived",
+          "title": "Archived Results",
+          "description": "Include archived Worktrail runs in resume results.",
+          "type": "checkbox",
+          "required": false,
+          "default": false,
+          "label": "Include archived runs"
+        }
+      ]
+    }
+  ],
+  "scripts": {
+    "dev": "ray develop",
+    "build": "ray build -e dist",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/**/*.test.ts",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@raycast/api": "1.104.19"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.17",
+    "@types/react": "19.0.10",
+    "prettier": "^3.8.4",
+    "tsx": "^4.20.6",
+    "typescript": "^5.8.3"
+  },
+  "packageManager": "pnpm@10.28.2"
+}
