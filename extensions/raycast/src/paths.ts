@@ -9,6 +9,13 @@ export class FilesystemPreferencePathError extends Error {
   }
 }
 
+export class DatabasePathError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DatabasePathError";
+  }
+}
+
 export class WorktrailProjectPathError extends Error {
   constructor(message: string) {
     super(message);
@@ -116,19 +123,39 @@ export async function resolveWorktrailProjectPath(
   return resolvedPath;
 }
 
-export function resolveOptionalDatabasePath(
+export async function resolveOptionalDatabasePath(
   configuredPath: string | undefined,
   homeDirectory = homedir(),
-): string | undefined {
+): Promise<string | undefined> {
   if (!configuredPath?.trim()) return undefined;
+  let resolvedPath: string;
   try {
-    return expandFilesystemPreferencePath(configuredPath, homeDirectory);
+    resolvedPath = expandFilesystemPreferencePath(
+      configuredPath,
+      homeDirectory,
+    );
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Invalid path.";
-    throw new FilesystemPreferencePathError(
-      `Database path is invalid. ${reason} Received “${homeNormalizePath(configuredPath.trim(), homeDirectory)}”.`,
+    throw databasePathError(configuredPath, undefined, reason, homeDirectory);
+  }
+
+  const databaseStat = await stat(resolvedPath).catch(() => {
+    throw databasePathError(
+      configuredPath,
+      resolvedPath,
+      "The resolved path does not exist or cannot be read.",
+      homeDirectory,
+    );
+  });
+  if (!databaseStat.isFile()) {
+    throw databasePathError(
+      configuredPath,
+      resolvedPath,
+      "The resolved path is not a file.",
+      homeDirectory,
     );
   }
+  return resolvedPath;
 }
 
 function identifiesWorktrail(packageJson: unknown): boolean {
@@ -159,5 +186,23 @@ function projectPathError(
     : "";
   return new WorktrailProjectPathError(
     `Worktrail project path is invalid. Raycast received “${received}”${resolution}. ${reason} Set “Worktrail project path” to the repository folder containing Worktrail’s package.json, for example: ~/Documents/worktrail or /Users/<name>/Documents/worktrail.`,
+  );
+}
+
+function databasePathError(
+  configuredPath: string,
+  resolvedPath: string | undefined,
+  reason: string,
+  homeDirectory: string,
+): DatabasePathError {
+  const received = homeNormalizePath(
+    configuredPath.trim() || "(empty)",
+    homeDirectory,
+  );
+  const resolution = resolvedPath
+    ? `, which resolved to “${homeNormalizePath(resolvedPath, homeDirectory)}”`
+    : "";
+  return new DatabasePathError(
+    `Database path is invalid. Raycast received “${received}”${resolution}. ${reason} Set “Database path” to an existing Worktrail SQLite database file, or leave it empty to use ~/.worktrail/worktrail.db.`,
   );
 }

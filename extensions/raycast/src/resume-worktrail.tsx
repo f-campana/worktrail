@@ -9,7 +9,11 @@ import {
 } from "@raycast/api";
 import { useEffect, useState } from "react";
 
-import { sanitizeErrorMessage, searchWorktrail } from "./client.js";
+import {
+  debugCommandFromError,
+  sanitizeErrorMessage,
+  searchWorktrail,
+} from "./client.js";
 import {
   deriveTargetDisplay,
   diagnosticMessages,
@@ -29,7 +33,7 @@ type ViewState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "success"; result: ResumeSearchResult }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; debugCommand?: string };
 
 export default function ResumeWorktrail() {
   const preferences = getPreferenceValues<WorktrailPreferences>();
@@ -70,12 +74,14 @@ export default function ResumeWorktrail() {
         })
         .catch((error: unknown) => {
           if (controller.signal.aborted) return;
+          const debugCommand = debugCommandFromError(error);
           setState({
             status: "error",
             message: sanitizeErrorMessage(error, [
               worktrailProjectPath,
               databasePath ?? "",
             ]),
+            ...(debugCommand ? { debugCommand } : {}),
           });
         });
     }, SEARCH_DEBOUNCE_MS);
@@ -137,6 +143,13 @@ function EmptyState({ query, state }: { query: string; state: ViewState }) {
       <List.EmptyView
         actions={
           <ActionPanel>
+            {state.debugCommand ? (
+              <Action.CopyToClipboard
+                content={state.debugCommand}
+                icon={Icon.Terminal}
+                title="Copy Debug Command"
+              />
+            ) : null}
             <Action
               icon={Icon.Gear}
               onAction={openCommandPreferences}

@@ -3,6 +3,14 @@ import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 
+const STANDARD_MACOS_EXECUTABLE_PATHS = [
+  "/usr/local/bin",
+  "/usr/bin",
+  "/bin",
+  "/usr/sbin",
+  "/sbin",
+];
+
 export const PNPM_RESOLUTION_ERROR_MESSAGE =
   "Unable to start pnpm. Raycast may not inherit your terminal PATH. Run `which pnpm` in Terminal, then set “pnpm executable path” in this command’s preferences. Tried: pnpm, /opt/homebrew/bin/pnpm, /usr/local/bin/pnpm, ~/Library/pnpm/pnpm.";
 
@@ -61,15 +69,23 @@ export function pnpmExecutionEnvironment(
   executable: string,
   environment: NodeJS.ProcessEnv = process.env,
   nodeExecutable = process.execPath,
+  homeDirectory = homedir(),
 ): NodeJS.ProcessEnv {
   const executableDirectory = isAbsolute(executable)
     ? dirname(executable)
     : undefined;
-  const path = [executableDirectory, dirname(nodeExecutable), environment.PATH]
-    .filter(Boolean)
-    .join(delimiter);
+  const path = [
+    executableDirectory,
+    dirname(nodeExecutable),
+    ...(environment.PATH?.split(delimiter) ?? []),
+    ...STANDARD_MACOS_EXECUTABLE_PATHS,
+  ];
 
-  return { ...environment, PATH: path };
+  return {
+    ...environment,
+    HOME: homeDirectory,
+    PATH: [...new Set(path.filter(Boolean))].join(delimiter),
+  };
 }
 
 async function isAvailableOnPath(

@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 
 import {
   buildWorktrailInvocation,
+  debugCommandFromError,
+  formatDebugCommand,
   sanitizeErrorMessage,
   searchWorktrail,
 } from "../src/client.js";
@@ -72,6 +74,44 @@ function response(overrides: Record<string, unknown> = {}) {
     diagnostics: [],
     ...overrides,
   };
+}
+
+async function withFakeExecution(
+  t: TestContext,
+  execute: (program: string, args: string[], cwd: string) => Promise<string>,
+  query = "github profile",
+) {
+  const homeDirectory = await mkdtemp(join(tmpdir(), "worktrail-raycast-"));
+  t.after(() => rm(homeDirectory, { recursive: true, force: true }));
+  const projectPath = join(homeDirectory, "Documents", "worktrail");
+  await mkdir(projectPath, { recursive: true });
+  await writeFile(
+    join(projectPath, "package.json"),
+    JSON.stringify({ name: "worktrail" }),
+  );
+  return searchWorktrail(
+    query,
+    {
+      worktrailProjectPath: "~/Documents/worktrail",
+      resultLimit: "5",
+      includeArchived: false,
+    },
+    undefined,
+    {
+      execute,
+      homeDirectory,
+      resolvePnpmExecutable: async () => "/opt/homebrew/bin/pnpm",
+    },
+  );
+}
+
+async function captureError(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+  assert.fail("Expected the promise to reject.");
 }
 
 test("parses a valid ResumeSearchResult v1", () => {
@@ -236,6 +276,16 @@ test("resolves project and database paths before argument-safe execution", async
       scripts: { worktrail: "tsx src/cli.ts" },
     }),
   );
+  const databasePath = join(
+    homeDirectory,
+    "Library",
+    "Application Support",
+    "worktrail.db",
+  );
+  await mkdir(join(homeDirectory, "Library", "Application Support"), {
+    recursive: true,
+  });
+  await writeFile(databasePath, "sqlite fixture");
 
   const query = "profile github; $(echo nope)";
   let execution: { program: string; args: string[]; cwd: string } | undefined;
@@ -276,15 +326,74 @@ test("resolves project and database paths before argument-safe execution", async
   assert.equal(execution.args.includes("~"), false);
 });
 
-test("expands an optional database path", () => {
-  assert.equal(
-    resolveOptionalDatabasePath(
-      "~/Library/Application Support/worktrail.db",
-      "/Users/example",
-    ),
-    "/Users/example/Library/Application Support/worktrail.db",
+test("expands and validates an optional database path", async (t) => {
+  const homeDirectory = await mkdtemp(join(tmpdir(), "worktrail-db-home-"));
+  t.after(() => rm(homeDirectory, { recursive: true, force: true }));
+  const databasePath = join(
+    homeDirectory,
+    "Library",
+    "Application Support",
+    "worktrail.db",
   );
-  assert.equal(resolveOptionalDatabasePath("  ", "/Users/example"), undefined);
+  await mkdir(join(homeDirectory, "Library", "Application Support"), {
+    recursive: true,
+  });
+  await writeFile(databasePath, "sqlite fixture");
+
+  assert.equal(
+    await resolveOptionalDatabasePath(
+      "~/Library/Application Support/worktrail.db",
+      homeDirectory,
+    ),
+    databasePath,
+  );
+  assert.equal(
+    await resolveOptionalDatabasePath("  ", homeDirectory),
+    undefined,
+  );
+});
+
+test("rejects an invalid database path before resolving or spawning pnpm", async (t) => {
+  let resolutionCalls = 0;
+  let executionCalls = 0;
+  const homeDirectory = await mkdtemp(join(tmpdir(), "worktrail-raycast-"));
+  t.after(() => rm(homeDirectory, { recursive: true, force: true }));
+  const projectPath = join(homeDirectory, "Documents", "worktrail");
+  await mkdir(projectPath, { recursive: true });
+  await writeFile(
+    join(projectPath, "package.json"),
+    JSON.stringify({ name: "worktrail" }),
+  );
+
+  const error = await captureError(
+    searchWorktrail(
+      "github profile",
+      {
+        worktrailProjectPath: "~/Documents/worktrail",
+        databasePath: "~/.worktrail/missing.db",
+        resultLimit: "5",
+        includeArchived: false,
+      },
+      undefined,
+      {
+        homeDirectory,
+        resolvePnpmExecutable: async () => {
+          resolutionCalls += 1;
+          return "/opt/homebrew/bin/pnpm";
+        },
+        execute: async () => {
+          executionCalls += 1;
+          return "";
+        },
+      },
+    ),
+  );
+
+  assert.match(sanitizeErrorMessage(error), /^Database path is invalid\./);
+  assert.match(sanitizeErrorMessage(error), /~\/\.worktrail\/missing\.db/);
+  assert.doesNotMatch(sanitizeErrorMessage(error), new RegExp(homeDirectory));
+  assert.equal(resolutionCalls, 0);
+  assert.equal(executionCalls, 0);
 });
 
 test("reports unsupported other-user project paths clearly", async () => {
@@ -353,13 +462,29 @@ test("makes Node available to an absolute pnpm launcher", () => {
     "/opt/homebrew/bin/pnpm",
     { PATH: "/usr/bin:/bin", WORKTRAIL_TEST: "true" },
     "/Applications/Raycast.app/Contents/Resources/node",
+    "/Users/example",
   );
 
   assert.equal(
     environment.PATH,
-    "/opt/homebrew/bin:/Applications/Raycast.app/Contents/Resources:/usr/bin:/bin",
+    "/opt/homebrew/bin:/Applications/Raycast.app/Contents/Resources:/usr/bin:/bin:/usr/local/bin:/usr/sbin:/sbin",
   );
   assert.equal(environment.WORKTRAIL_TEST, "true");
+  assert.equal(environment.HOME, "/Users/example");
+});
+
+test("adds standard macOS paths to a reduced Raycast environment", () => {
+  const environment = pnpmExecutionEnvironment(
+    "/opt/homebrew/bin/pnpm",
+    { PATH: "/raycast/bin" },
+    "/Applications/Raycast.app/Contents/Resources/node",
+    "/Users/example",
+  );
+
+  assert.equal(
+    environment.PATH,
+    "/opt/homebrew/bin:/Applications/Raycast.app/Contents/Resources:/raycast/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+  );
 });
 
 test("reports actionable guidance when pnpm cannot be resolved", async () => {
@@ -386,29 +511,137 @@ test("reports actionable guidance when pnpm cannot be resolved", async () => {
   );
 });
 
-test("sanitizes CLI errors without exposing paths or URL credentials", () => {
-  const error = Object.assign(new Error("command failed"), {
-    stderr:
-      "worktrail: unable to read /Users/private/Documents/worktrail at https://user:secret@example.com/repo\nstack omitted",
-  });
+test("reports exit code with bounded sanitized stderr and a debug command", async (t) => {
+  const error = await captureError(
+    withFakeExecution(t, async () => {
+      throw Object.assign(new Error("command failed"), {
+        code: 7,
+        stderr: `worktrail: unable to read /Users/private/Documents/worktrail at https://user:secret@example.com/repo ${"detail ".repeat(80)}\nstack omitted`,
+        stdout: "ignored stdout",
+      });
+    }),
+  );
   const message = sanitizeErrorMessage(error, [
     "/Users/private/Documents/worktrail",
   ]);
-  assert.equal(
+
+  assert.match(message, /^Worktrail CLI exited with code 7\./);
+  assert.match(message, /stderr: unable to read ~/);
+  assert.match(message, /https:\/\/\[credentials\]@example\.com\/repo/);
+  assert.match(message, /Command: \/opt\/homebrew\/bin\/pnpm --silent/);
+  assert.match(message, /--dir "\$HOME\/Documents\/worktrail"/);
+  assert.ok(message.length <= 720);
+  assert.doesNotMatch(message, /secret|stack omitted|ignored stdout/);
+  assert.match(debugCommandFromError(error) ?? "", /'github profile'/);
+});
+
+test("uses bounded stdout when stderr is empty", async (t) => {
+  const error = await captureError(
+    withFakeExecution(t, async () => {
+      throw Object.assign(new Error("command failed"), {
+        code: 2,
+        stderr: "",
+        stdout:
+          "worktrail: database unavailable at /Users/private/.worktrail/worktrail.db\nadditional output omitted",
+      });
+    }),
+  );
+  const message = sanitizeErrorMessage(error);
+
+  assert.match(message, /^Worktrail CLI exited with code 2\./);
+  assert.match(
     message,
-    "unable to read ~ at https://[credentials]@example.com/repo",
+    /stdout: database unavailable at ~\/\.worktrail\/worktrail\.db/,
+  );
+  assert.doesNotMatch(message, /additional output omitted/);
+});
+
+test("reports invalid JSON without treating stderr warnings as JSON", async (t) => {
+  const error = await captureError(
+    withFakeExecution(
+      t,
+      async () => "ExperimentalWarning: SQLite is experimental\n{not-json}",
+    ),
+  );
+  const message = sanitizeErrorMessage(error);
+
+  assert.match(message, /^Worktrail returned invalid JSON on stdout\./);
+  assert.match(message, /warnings on stderr are safe/);
+  assert.ok(debugCommandFromError(error));
+});
+
+test("reports response schema mismatch", async (t) => {
+  const error = await captureError(
+    withFakeExecution(t, async () =>
+      JSON.stringify(
+        response({ targets: [{ ...target, confidence: "certain" }] }),
+      ),
+    ),
+  );
+  const message = sanitizeErrorMessage(error);
+
+  assert.match(message, /^Worktrail response schema mismatch\./);
+  assert.match(message, /targets\[0\]\.confidence/);
+  assert.ok(debugCommandFromError(error));
+});
+
+test("reports unsupported schema version separately", async (t) => {
+  const error = await captureError(
+    withFakeExecution(t, async () =>
+      JSON.stringify(response({ schemaVersion: 2 })),
+    ),
+  );
+
+  assert.match(
+    sanitizeErrorMessage(error),
+    /^Worktrail response schema version mismatch\./,
   );
 });
 
-test("uses bounded stdout details when a started command exits non-zero", () => {
-  const error = Object.assign(new Error("Command failed: pnpm --dir ~"), {
-    stderr: "",
-    stdout:
-      "worktrail: database unavailable at /Users/private/.worktrail/worktrail.db\nadditional output omitted",
-  });
+test("reports timeout separately with a debug command", async (t) => {
+  const error = await captureError(
+    withFakeExecution(t, async () => {
+      throw Object.assign(new Error("timed out"), {
+        code: "ETIMEDOUT",
+        killed: true,
+      });
+    }),
+  );
+
+  assert.match(
+    sanitizeErrorMessage(error),
+    /^Worktrail search timed out after 15 seconds\./,
+  );
+  assert.ok(debugCommandFromError(error));
+});
+
+test("classifies an unknown exception without exposing multiple lines", () => {
+  assert.equal(
+    sanitizeErrorMessage(
+      new Error("unexpected internal failure\nprivate stack line"),
+    ),
+    "Unexpected Worktrail search failure. unexpected internal failure",
+  );
+});
+
+test("formats a home-normalized shell-safe debug command", () => {
+  const command = formatDebugCommand(
+    buildWorktrailInvocation(
+      "github profile; echo nope",
+      {
+        worktrailProjectPath: "/Users/private/Documents/worktrail",
+        databasePath: "/Users/private/.worktrail/worktrail.db",
+        resultLimit: "5",
+        includeArchived: false,
+      },
+      "/opt/homebrew/bin/pnpm",
+    ),
+    "/Users/private",
+  );
 
   assert.equal(
-    sanitizeErrorMessage(error),
-    "database unavailable at ~/.worktrail/worktrail.db",
+    command,
+    `/opt/homebrew/bin/pnpm --silent --dir "$HOME/Documents/worktrail" worktrail resume 'github profile; echo nope' --json --limit 5 --db "$HOME/.worktrail/worktrail.db"`,
   );
+  assert.doesNotMatch(command, /\/Users\/private/);
 });

@@ -37,8 +37,8 @@ hotkey for **Resume Worktrail** if desired.
   Worktrail's `package.json`. `~` and `~/...` paths are supported; for example,
   `~/Documents/worktrail`.
 - **Database Path** (optional): passed to Worktrail as `--db PATH`. `~` and
-  `~/...` paths are supported. If omitted, Worktrail uses its normal default
-  database.
+  `~/...` paths are supported. A configured path must be an existing file. If
+  omitted, Worktrail uses its normal `~/.worktrail/worktrail.db` default.
 - **Result Limit**: 3, 5 (default), 10, or 20.
 - **Include archived runs**: disabled by default.
 
@@ -61,10 +61,22 @@ the JSON contract. The extension adds `--db <database-path>` and
 `ResumeSearchResult` schema version 1 and rejects unknown schema versions
 instead of guessing.
 
+The child receives the resolved home directory and a deterministic executable
+path containing pnpm, Node, Raycast's inherited entries, and the standard macOS
+system directories. The system entries are required because repository-local
+launchers can use utilities from `/usr/bin` and `/bin` even when pnpm itself is
+an absolute executable.
+
 The command shows empty, loading, no-result, ranked-result, diagnostic, and
 sanitized-error states. Each result includes compact metadata, signals, related
 files/runs, and every copy action declared in `openActions`. A target without a
 declared or contract-provided resume command is clearly marked unavailable.
+
+Started-command failures show the exit code, one bounded sanitized line from
+stderr (or stdout when stderr is empty), and a home-normalized command summary.
+The error action **Copy Debug Command** copies the shell-safe equivalent for a
+manual Terminal comparison. JSON parse, schema/version, timeout, preference,
+spawn, and unknown failures are classified separately.
 
 The primary action copies `codex resume <SESSION_ID>` when Worktrail declares
 it. Secondary actions can copy a declared ID, the resume UUID, or the target
@@ -118,13 +130,33 @@ The pnpm executable is configured separately. Run `which pnpm` when Raycast
 cannot locate it, then copy that command's absolute result into **pnpm
 executable path**.
 
+### Worktrail exits with code 254 and no output
+
+pnpm can surface an underlying `ENOENT` (`errno -2`) as exit code 254. With
+`--silent`, its reporter does not print the missing nested executable. This can
+happen when Raycast's reduced `PATH` can start an absolute pnpm binary but omits
+standard utilities needed by a repository-local launcher.
+
+The extension guarantees the standard macOS executable directories in the
+child `PATH`. If code 254 persists, use **Copy Debug Command** and run the
+copied command in Terminal; the displayed error remains bounded and contains
+no full stdout/stderr dump.
+
+### Database path
+
+Leave **Database Path** empty to use Worktrail's normal default under `HOME`, or
+select an existing SQLite database file. The extension expands `~`, validates
+an explicit file before starting pnpm, and passes the same resolved `HOME` to
+the child process.
+
 ## Privacy
 
 - Searches and results stay local; the extension performs no uploads or network
   requests.
 - Results are transient React state and are not persisted by the extension.
-- Full stdout and stderr are never logged or shown. Error messages are bounded,
-  flattened, and scrubbed of configured paths, raw home paths, and URL
+- Full stdout and stderr are never logged or shown. A failed command may show
+  one bounded line from stderr, or stdout when stderr is empty. Messages are
+  flattened and scrubbed of configured paths, raw home paths, and URL
   credentials.
 - The UI does not render source IDs, evidence excerpts, transcript content,
   diffs, or remote credential material.
