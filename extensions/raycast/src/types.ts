@@ -55,6 +55,7 @@ export type ResumeSearchResult = {
 };
 
 export type WorktrailPreferences = {
+  pnpmPath?: string;
   worktrailProjectPath: string;
   databasePath?: string;
   resultLimit: string;

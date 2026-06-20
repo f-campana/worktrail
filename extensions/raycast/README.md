@@ -9,7 +9,7 @@ archive filtering, and command construction remain owned by Worktrail.
 
 - Raycast for macOS
 - Node.js 22.5 or newer
-- pnpm 10 or newer, available to the Raycast process
+- pnpm 10 or newer, available on Raycast's `PATH` or configured by absolute path
 - A local checkout of Worktrail with dependencies installed
 
 ## Install locally
@@ -31,6 +31,8 @@ hotkey for **Resume Worktrail** if desired.
 
 ## Preferences
 
+- **pnpm executable path** (optional): absolute path to `pnpm`. Leave empty to
+  use automatic resolution.
 - **Worktrail Project Path** (required): the repository containing the
   `worktrail` pnpm script.
 - **Database Path** (optional): passed to Worktrail as `--db PATH`. If omitted,
@@ -40,8 +42,10 @@ hotkey for **Resume Worktrail** if desired.
 
 ## Invocation and behavior
 
-For non-empty search text, the extension uses argument-safe process execution;
-the query is never interpolated into a shell command. Conceptually it invokes:
+For non-empty search text, the extension safely resolves `pnpm` from the
+configured absolute path, Raycast's `PATH`, or common installation paths. It
+then uses argument-array process execution; the query is never interpolated
+into a shell command. Conceptually it invokes:
 
 ```text
 pnpm --silent --dir <project-path> worktrail resume <query> --json --limit <limit>
@@ -62,6 +66,37 @@ The primary action copies `codex resume <SESSION_ID>` when Worktrail declares
 it. Secondary actions can copy a declared ID, the resume UUID, or the target
 title. The extension never runs Codex, opens Terminal, mutates Worktrail, or
 reimplements ranking.
+
+## Troubleshooting
+
+### Raycast cannot find pnpm
+
+Raycast is launched as a macOS app and may not inherit the same `PATH` as an
+interactive Terminal shell. This can make `pnpm` work in Terminal but fail from
+the extension.
+
+Run the following in Terminal:
+
+```sh
+which pnpm
+```
+
+Copy the returned absolute path into **pnpm executable path** in the **Resume
+Worktrail** command preferences. Common values are:
+
+```text
+/opt/homebrew/bin/pnpm
+/usr/local/bin/pnpm
+~/Library/pnpm/pnpm
+```
+
+Use the fully expanded absolute path from `which pnpm`, not a path containing
+`~`. Reopen **Resume Worktrail** and enter a known query. A ranked result or the
+clean **No resumable work found** state confirms that pnpm started correctly.
+
+The extension intentionally does not invoke `/bin/zsh -lc`: direct executable
+resolution keeps project paths and search queries as separate process
+arguments. A future packaged Worktrail binary may remove the pnpm dependency.
 
 ## Privacy
 
@@ -96,7 +131,8 @@ and the [Raycast CLI](https://developers.raycast.com/information/developer-tools
 
 - Invocation currently supports the repository's pnpm script, not a separately
   installed `worktrail` binary.
-- `pnpm` must be on the environment path visible to Raycast.
+- A local pnpm installation is still required, either discoverable by Raycast
+  or selected in command preferences.
 - Confidence is displayed as supplied by Worktrail; it is not a calibrated
   probability.
 - Candidate workstreams appear if the CLI returns them, but Worktrail does not

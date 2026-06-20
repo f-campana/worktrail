@@ -23,6 +23,14 @@
       "mode": "view",
       "preferences": [
         {
+          "name": "pnpmPath",
+          "title": "pnpm executable path",
+          "description": "Absolute path to pnpm. Run `which pnpm` in your terminal if Raycast cannot find pnpm.",
+          "type": "textfield",
+          "required": false,
+          "placeholder": "/opt/homebrew/bin/pnpm"
+        },
+        {
           "name": "worktrailProjectPath",
           "title": "Worktrail Project Path",
           "description": "Repository containing the Worktrail pnpm script.",

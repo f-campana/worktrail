@@ -52,6 +52,38 @@ wrapper now passes `--silent` as a separate pnpm argument. Stdout then contains
 only `ResumeSearchResult`, and the full corpus parses through the extension.
 This was an invocation issue, not a JSON schema or Worktrail CLI contract gap.
 
+## Live user test: pnpm not found from Raycast
+
+A live launch of **Resume Worktrail** reached the extension UI, but searching
+failed before results rendered because the Raycast process could not start
+`pnpm`. The likely cause is the macOS app environment not inheriting the
+interactive Terminal `PATH`.
+
+The extension now accepts an optional absolute **pnpm executable path** and
+resolves pnpm in this order: the configured executable, Raycast's `PATH`, then
+common Homebrew and user-local installation paths. Resolution checks and CLI
+execution remain argument-array based; no query or path is interpolated into a
+shell. If resolution fails, the UI directs the user to run `which pnpm` and set
+the command preference.
+
+Automated helper tests cover every resolution branch. Post-fix checks through
+the extension's actual client path returned five results each for `profile
+github`, `fast resume`, and a known-good Worktrail query; every top result
+exposed a copy-command action. The production build and a `ray develop` session
+both compiled successfully.
+
+An additional process-level check removed pnpm's installation directory from
+`PATH`. Automatic common-path fallback and an explicit executable preference
+both still returned ranked results. The child process receives the resolved
+pnpm directory and active Node runtime directory on its private `PATH`, which
+supports pnpm launchers that use `#!/usr/bin/env node` without changing the
+extension process environment.
+
+Native search and clipboard interaction could not be driven because this Codex
+environment has no Raycast UI automation access. A user pass is still required
+to confirm the configured executable inside the native command. The extension
+continues to depend on pnpm until an installed Worktrail binary mode is added.
+
 ## Privacy and safety observations
 
 - The structural capture contained no target titles, source IDs, evidence

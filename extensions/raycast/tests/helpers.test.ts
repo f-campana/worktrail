@@ -10,6 +10,12 @@ import {
   ResumeCompatibilityError,
 } from "../src/contract.js";
 import { deriveTargetDisplay, selectCopyCommand } from "../src/display.js";
+import {
+  PNPM_RESOLUTION_ERROR_MESSAGE,
+  PnpmResolutionError,
+  pnpmExecutionEnvironment,
+  resolvePnpmExecutable,
+} from "../src/pnpm.js";
 import type { ResumableTarget } from "../src/types.js";
 
 const target: ResumableTarget = {
@@ -122,6 +128,89 @@ test("builds an argument-safe pnpm invocation", () => {
     "/tmp/worktrail.db",
     "--include-archived",
   ]);
+});
+
+test("uses the explicit pnpm executable preference first", async () => {
+  const checked: string[] = [];
+  const executable = await resolvePnpmExecutable(" /custom/bin/pnpm ", {
+    environmentPath: "/raycast/bin",
+    homeDirectory: "/Users/example",
+    isExecutable: async (path) => {
+      checked.push(path);
+      return path === "/custom/bin/pnpm";
+    },
+  });
+
+  assert.equal(executable, "/custom/bin/pnpm");
+  assert.deepEqual(checked, ["/custom/bin/pnpm"]);
+});
+
+test("uses bare pnpm when it is available on Raycast's PATH", async () => {
+  const executable = await resolvePnpmExecutable(undefined, {
+    environmentPath: "/raycast/bin:/usr/bin",
+    homeDirectory: "/Users/example",
+    isExecutable: async (path) => path === "/raycast/bin/pnpm",
+  });
+
+  assert.equal(executable, "pnpm");
+});
+
+test("falls back to a common absolute pnpm path", async () => {
+  const checked: string[] = [];
+  const executable = await resolvePnpmExecutable(undefined, {
+    environmentPath: "/raycast/bin",
+    homeDirectory: "/Users/example",
+    isExecutable: async (path) => {
+      checked.push(path);
+      return path === "/Users/example/Library/pnpm/pnpm";
+    },
+  });
+
+  assert.equal(executable, "/Users/example/Library/pnpm/pnpm");
+  assert.deepEqual(checked, [
+    "/raycast/bin/pnpm",
+    "/opt/homebrew/bin/pnpm",
+    "/usr/local/bin/pnpm",
+    "/Users/example/Library/pnpm/pnpm",
+  ]);
+});
+
+test("makes Node available to an absolute pnpm launcher", () => {
+  const environment = pnpmExecutionEnvironment(
+    "/opt/homebrew/bin/pnpm",
+    { PATH: "/usr/bin:/bin", WORKTRAIL_TEST: "true" },
+    "/Applications/Raycast.app/Contents/Resources/node",
+  );
+
+  assert.equal(
+    environment.PATH,
+    "/opt/homebrew/bin:/Applications/Raycast.app/Contents/Resources:/usr/bin:/bin",
+  );
+  assert.equal(environment.WORKTRAIL_TEST, "true");
+});
+
+test("reports actionable guidance when pnpm cannot be resolved", async () => {
+  await assert.rejects(
+    resolvePnpmExecutable(undefined, {
+      environmentPath: "/raycast/bin",
+      homeDirectory: "/Users/example",
+      isExecutable: async () => false,
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof PnpmResolutionError);
+      assert.equal(error.message, PNPM_RESOLUTION_ERROR_MESSAGE);
+      return true;
+    },
+  );
+
+  assert.equal(
+    sanitizeErrorMessage(
+      Object.assign(new Error("spawn pnpm ENOENT"), {
+        code: "ENOENT",
+      }),
+    ),
+    PNPM_RESOLUTION_ERROR_MESSAGE,
+  );
 });
 
 test("sanitizes CLI errors without exposing paths or URL credentials", () => {

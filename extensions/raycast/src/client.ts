@@ -2,6 +2,12 @@ import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 
 import { parseResumeSearchResult } from "./contract.js";
+import {
+  PNPM_RESOLUTION_ERROR_MESSAGE,
+  PnpmResolutionError,
+  pnpmExecutionEnvironment,
+  resolvePnpmExecutable,
+} from "./pnpm.js";
 import type { ResumeSearchResult, WorktrailPreferences } from "./types.js";
 
 const MAX_OUTPUT_BYTES = 1_000_000;
@@ -10,7 +16,8 @@ const SEARCH_TIMEOUT_MS = 15_000;
 export function buildWorktrailInvocation(
   query: string,
   preferences: WorktrailPreferences,
-): { program: "pnpm"; args: string[] } {
+  program = "pnpm",
+): { program: string; args: string[] } {
   const limit = Number.parseInt(preferences.resultLimit, 10);
   if (!Number.isInteger(limit) || limit < 1 || limit > 20) {
     throw new Error("Result limit must be between 1 and 20.");
@@ -31,7 +38,7 @@ export function buildWorktrailInvocation(
     args.push("--db", preferences.databasePath);
   }
   if (preferences.includeArchived) args.push("--include-archived");
-  return { program: "pnpm", args };
+  return { program, args };
 }
 
 export async function searchWorktrail(
@@ -39,7 +46,12 @@ export async function searchWorktrail(
   preferences: WorktrailPreferences,
   signal?: AbortSignal,
 ): Promise<ResumeSearchResult> {
-  const invocation = buildWorktrailInvocation(query, preferences);
+  const pnpmExecutable = await resolvePnpmExecutable(preferences.pnpmPath);
+  const invocation = buildWorktrailInvocation(
+    query,
+    preferences,
+    pnpmExecutable,
+  );
   const stdout = await execute(
     invocation.program,
     invocation.args,
@@ -69,6 +81,7 @@ function execute(
       {
         cwd,
         encoding: "utf8",
+        env: pnpmExecutionEnvironment(program),
         maxBuffer: MAX_OUTPUT_BYTES,
         timeout: SEARCH_TIMEOUT_MS,
         signal,
@@ -86,8 +99,11 @@ export function sanitizeErrorMessage(
   error: unknown,
   privatePaths: string[] = [],
 ): string {
-  if (isNodeError(error) && error.code === "ENOENT") {
-    return "Unable to start pnpm. Check that pnpm is available to Raycast.";
+  if (
+    error instanceof PnpmResolutionError ||
+    (isNodeError(error) && error.code === "ENOENT")
+  ) {
+    return PNPM_RESOLUTION_ERROR_MESSAGE;
   }
   if (isNodeError(error) && error.killed) {
     return "Worktrail search timed out.";

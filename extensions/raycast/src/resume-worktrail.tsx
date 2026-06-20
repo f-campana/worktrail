@@ -33,8 +33,13 @@ type ViewState =
 
 export default function ResumeWorktrail() {
   const preferences = getPreferenceValues<WorktrailPreferences>();
-  const { databasePath, includeArchived, resultLimit, worktrailProjectPath } =
-    preferences;
+  const {
+    databasePath,
+    includeArchived,
+    pnpmPath,
+    resultLimit,
+    worktrailProjectPath,
+  } = preferences;
   const [searchText, setSearchText] = useState("");
   const [state, setState] = useState<ViewState>({ status: "idle" });
   const query = searchText.trim();
@@ -53,6 +58,7 @@ export default function ResumeWorktrail() {
         {
           databasePath,
           includeArchived,
+          pnpmPath,
           resultLimit,
           worktrailProjectPath,
         },
@@ -78,7 +84,14 @@ export default function ResumeWorktrail() {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [databasePath, includeArchived, query, resultLimit, worktrailProjectPath]);
+  }, [
+    databasePath,
+    includeArchived,
+    pnpmPath,
+    query,
+    resultLimit,
+    worktrailProjectPath,
+  ]);
 
   const result = state.status === "success" ? state.result : undefined;
   const targets = result?.targets ?? [];
