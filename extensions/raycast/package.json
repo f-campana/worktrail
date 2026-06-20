@@ -23,19 +23,27 @@
       "mode": "view",
       "preferences": [
         {
-          "name": "pnpmPath",
-          "title": "pnpm executable path",
-          "description": "Absolute path to pnpm. Run `which pnpm` in your terminal if Raycast cannot find pnpm.",
+          "name": "worktrailPath",
+          "title": "Worktrail executable path",
+          "description": "Path or command name for the installed Worktrail CLI. Recommended for normal use.",
           "type": "textfield",
           "required": false,
-          "placeholder": "/opt/homebrew/bin/pnpm"
+          "placeholder": "~/.local/bin/worktrail"
         },
         {
           "name": "worktrailProjectPath",
-          "title": "Worktrail Project Path",
-          "description": "Path to the Worktrail repository folder. `~` and `~/...` are supported. Example: `~/Documents/worktrail`. This should be the folder containing Worktrail’s `package.json`.",
+          "title": "Worktrail project path (development fallback)",
+          "description": "Optional repository folder used with pnpm only when no installed Worktrail executable is available.",
           "type": "directory",
-          "required": true
+          "required": false
+        },
+        {
+          "name": "pnpmPath",
+          "title": "pnpm executable path (development fallback)",
+          "description": "Optional pnpm executable used with the project path only for development fallback.",
+          "type": "textfield",
+          "required": false,
+          "placeholder": "/opt/homebrew/bin/pnpm"
         },
         {
           "name": "databasePath",

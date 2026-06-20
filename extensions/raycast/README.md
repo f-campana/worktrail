@@ -9,12 +9,21 @@ archive filtering, and command construction remain owned by Worktrail.
 
 - Raycast for macOS
 - Node.js 22.5 or newer
-- pnpm 10 or newer, available on Raycast's `PATH` or configured by absolute path
-- A local checkout of Worktrail with dependencies installed
+- An installed Worktrail CLI (preferred), configured by command name or path
+- pnpm 10 and a Worktrail checkout only for extension development or the
+  optional development fallback
 
 ## Install locally
 
-From this directory:
+First build and install Worktrail from the repository root:
+
+```sh
+pnpm build
+npm install --global --prefix "$HOME/.local" .
+"$HOME/.local/bin/worktrail" resume "profile" --json --limit 5
+```
+
+Then import the private extension from this directory:
 
 ```sh
 pnpm install
@@ -31,11 +40,14 @@ hotkey for **Resume Worktrail** if desired.
 
 ## Preferences
 
-- **pnpm executable path** (optional): absolute path to `pnpm`. Leave empty to
-  use automatic resolution.
-- **Worktrail Project Path** (required): the repository folder containing
-  Worktrail's `package.json`. `~` and `~/...` paths are supported; for example,
-  `~/Documents/worktrail`.
+- **Worktrail executable path** (recommended): installed command name or
+  executable path, for example `worktrail`, `~/.local/bin/worktrail`, or
+  `/opt/homebrew/bin/worktrail`. `~` and `~/...` are supported for paths.
+- **Worktrail project path (development fallback)** (optional): repository
+  folder containing Worktrail's `package.json`. Configure this only when
+  developing without an installed executable.
+- **pnpm executable path (development fallback)** (optional): pnpm command used
+  with the project path. Leave empty for automatic pnpm resolution.
 - **Database Path** (optional): passed to Worktrail as `--db PATH`. `~` and
   `~/...` paths are supported. A configured path must be an existing file. If
   omitted, Worktrail uses its normal `~/.worktrail/worktrail.db` default.
@@ -44,28 +56,38 @@ hotkey for **Resume Worktrail** if desired.
 
 ## Invocation and behavior
 
-For non-empty search text, the extension safely resolves `pnpm` from the
-configured absolute path, Raycast's `PATH`, or common installation paths. It
-expands local project/database path preferences without invoking a shell,
-validates the project directory, and then uses argument-array process
-execution. The query is never interpolated into a shell command. Conceptually
-it invokes:
+For non-empty search text, the extension resolves its invocation in this order:
+
+1. The configured **Worktrail executable path**, when executable or available
+   on Raycast's `PATH`.
+2. Bare `worktrail` on Raycast's `PATH`.
+3. The pnpm/project development fallback when a project path is configured.
+4. An actionable missing-executable error.
+
+Normal installed mode uses argument-array process execution and conceptually
+invokes:
+
+```text
+worktrail resume <query> --json --limit <limit>
+```
+
+Development fallback invokes:
 
 ```text
 pnpm --silent --dir <project-path> worktrail resume <query> --json --limit <limit>
 ```
 
-The `--silent` pnpm option suppresses lifecycle banners so stdout contains only
-the JSON contract. The extension adds `--db <database-path>` and
+The fallback's `--silent` pnpm option suppresses lifecycle banners so stdout
+contains only the JSON contract. The extension adds `--db <database-path>` and
 `--include-archived` only when their preferences are enabled. It parses
 `ResumeSearchResult` schema version 1 and rejects unknown schema versions
 instead of guessing.
 
 The child receives the resolved home directory and a deterministic executable
-path containing pnpm, Node, Raycast's inherited entries, and the standard macOS
-system directories. The system entries are required because repository-local
-launchers can use utilities from `/usr/bin` and `/bin` even when pnpm itself is
-an absolute executable.
+path containing the selected executable directory, Node, Raycast's inherited
+entries, and standard macOS system directories. No shell is invoked, so the
+query remains one process argument even when it contains shell-significant
+text.
 
 The command shows empty, loading, no-result, ranked-result, diagnostic, and
 sanitized-error states. Each result includes compact metadata, signals, related
@@ -85,6 +107,21 @@ reimplements ranking.
 
 ## Troubleshooting
 
+### Raycast cannot find Worktrail
+
+Verify the installed CLI in Terminal first:
+
+```sh
+"$HOME/.local/bin/worktrail" resume "profile" --json --limit 5
+```
+
+Set **Worktrail executable path** to that absolute path. Alternatively, set it
+to `worktrail` when the command is already on Raycast's `PATH`. Do not configure
+the project and pnpm fields for normal installed use; they are fallback-only.
+
+If no installed executable is available, configure both the Worktrail project
+path and, when automatic resolution fails, the pnpm executable path.
+
 ### Raycast cannot find pnpm
 
 Raycast is launched as a macOS app and may not inherit the same `PATH` as an
@@ -97,8 +134,8 @@ Run the following in Terminal:
 which pnpm
 ```
 
-Copy the returned absolute path into **pnpm executable path** in the **Resume
-Worktrail** command preferences. Common values are:
+This applies only to the development fallback. Copy the returned absolute path
+into **pnpm executable path (development fallback)**. Common values are:
 
 ```text
 /opt/homebrew/bin/pnpm
@@ -112,30 +149,30 @@ clean **No resumable work found** state confirms that pnpm started correctly.
 
 The extension intentionally does not invoke `/bin/zsh -lc`: direct executable
 resolution keeps project paths and search queries as separate process
-arguments. A future packaged Worktrail binary may remove the pnpm dependency.
+arguments.
 
 ### Worktrail project path
 
-Set **Worktrail Project Path** to the repository folder, normally
-`~/Documents/worktrail` or its absolute path. The extension supports `~` and
-`~/...`, resolves them internally, and requires the selected directory to
-contain Worktrail's `package.json`.
+For development fallback only, set **Worktrail project path** to the repository
+folder, normally `~/Documents/worktrail` or its absolute path. The extension
+supports `~` and `~/...`, resolves them internally, and requires the selected
+directory to contain Worktrail's `package.json`.
 
 If an older extension reports a command failure containing `--dir ~`, update
 to the latest version or set the full absolute repository path. A value of `~`
 alone refers to the home directory, not the Worktrail checkout, unless the
 repository itself is located there.
 
-The pnpm executable is configured separately. Run `which pnpm` when Raycast
-cannot locate it, then copy that command's absolute result into **pnpm
-executable path**.
+The pnpm executable is configured separately. This project preference is not
+validated or used when installed executable mode succeeds.
 
 ### Worktrail exits with code 254 and no output
 
-pnpm can surface an underlying `ENOENT` (`errno -2`) as exit code 254. With
-`--silent`, its reporter does not print the missing nested executable. This can
-happen when Raycast's reduced `PATH` can start an absolute pnpm binary but omits
-standard utilities needed by a repository-local launcher.
+In development fallback, pnpm can surface an underlying `ENOENT` (`errno -2`)
+as exit code 254. With `--silent`, its reporter does not print the missing
+nested executable. This can happen when Raycast's reduced `PATH` can start an
+absolute pnpm binary but omits standard utilities needed by a repository-local
+launcher.
 
 The extension guarantees the standard macOS executable directories in the
 child `PATH`. If code 254 persists, use **Copy Debug Command** and run the
@@ -146,8 +183,18 @@ no full stdout/stderr dump.
 
 Leave **Database Path** empty to use Worktrail's normal default under `HOME`, or
 select an existing SQLite database file. The extension expands `~`, validates
-an explicit file before starting pnpm, and passes the same resolved `HOME` to
-the child process.
+an explicit file before starting either invocation mode, and passes the same
+resolved `HOME` to the child process.
+
+## Why not call pnpm forever?
+
+Repository-based pnpm invocation remains useful for private dogfood and source
+development. It is fragile as a GUI application boundary because it depends on
+a checkout, installed dependencies, a package manager, and nested launcher
+environment details. The installed executable is one stable process boundary
+for Raycast and a better base for later distribution. Both paths consume the
+same CLI and `ResumeSearchResult` JSON contract; Raycast still owns no ranking
+or resume-command construction.
 
 ## Privacy
 
@@ -186,12 +233,10 @@ and the [Raycast CLI](https://developers.raycast.com/information/developer-tools
 
 ## Current limitations
 
-- Invocation currently supports the repository's pnpm script, not a separately
-  installed `worktrail` binary.
-- The project path must point at the repository root; parent directories and
-  arbitrary packages are rejected before pnpm starts.
-- A local pnpm installation is still required, either discoverable by Raycast
-  or selected in command preferences.
+- The local executable still requires Node.js 22.5 or newer; it is compiled
+  JavaScript, not a standalone native binary.
+- Development fallback project paths must point at the repository root; parent
+  directories and arbitrary packages are rejected before pnpm starts.
 - Confidence is displayed as supplied by Worktrail; it is not a calibrated
   probability.
 - Candidate workstreams appear if the CLI returns them, but Worktrail does not

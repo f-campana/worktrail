@@ -253,3 +253,63 @@ unsupported speed claim. The recommended next task is to package an installed
 `worktrail` executable and add a configurable executable preference, preserving
 the current CLI/JSON contract and removing pnpm/repository setup from the
 Raycast distribution boundary.
+
+## Installed executable pass
+
+Validated on 2026-06-21. Worktrail now compiles its TypeScript sources to ESM in
+`dist`, copies the three SQLite migrations beside the compiled database module,
+and exposes `dist/cli.js` through the package `worktrail` bin declaration. The
+compiled entry point preserves its Node shebang and is marked executable. A
+temporary-prefix `npm install --global` check created an executable
+`<prefix>/bin/worktrail`; its help ran successfully and all three runtime
+migrations were present. No global test installation was left behind.
+
+Direct built-CLI checks for `resume "profile"`, `resume "github profile"`,
+`search "profile"`, and a time-bounded `report` all exited zero and returned
+parseable JSON on stdout. Both resume responses used schema version 1 and
+returned five targets. The top `copy-command` value exactly matched the target's
+declared `resumeCommand`. The existing `pnpm --silent worktrail resume ...`
+development path returned the same schema and target count. All captured stderr
+files were empty; a future Node SQLite warning on stderr remains harmless
+because clients parse stdout only.
+
+The four native-closing queries were then exercised through the Raycast
+client's actual installed-executable branch using the absolute generated
+`dist/cli.js` path and no project/pnpm preferences:
+
+| Query                        | Schema | Results | Diagnostics | Copy action | Declared value match |
+| ---------------------------- | -----: | ------: | ----------: | ----------- | -------------------- |
+| `profile`                    |      1 |       5 |           0 | yes         | yes                  |
+| `github profile`             |      1 |       5 |           0 | yes         | yes                  |
+| `fast resume`                |      1 |       5 |           0 | yes         | yes                  |
+| `zzzznonexistenttoken987654` |      1 |       0 |           0 | n/a         | n/a                  |
+
+This confirms executable preference resolution, shell-free argument passing,
+stdout-only parsing, schema validation, ranked results, and the clean empty
+response without invoking pnpm. The UI and copy-action rendering code is
+unchanged. Codex and Terminal were not executed.
+
+Native interaction still requires the Raycast app and user input. To close that
+last UI-specific check:
+
+1. Build and install Worktrail, then set **Worktrail executable path** to the
+   absolute installed path (for example
+   `/Users/<name>/.local/bin/worktrail`).
+2. Clear the Worktrail project and pnpm fallback preferences.
+3. Run `profile`, `github profile`, `fast resume`, and
+   `zzzznonexistenttoken987654` in **Resume Worktrail**.
+4. Confirm three ranked-result views and one clean no-result view.
+5. On one result, press Enter to copy, paste into a non-executing text field,
+   and confirm it is the selected target's declared `codex resume <UUID>`
+   action. Do not execute the pasted command.
+
+The pnpm/project path remains supported strictly as development fallback. The
+installed executable is now the preferred normal-use boundary, while Worktrail's
+CLI/JSON contract remains the source of ranking and action data.
+
+Validation completed with 46/46 root tests and 36/36 Raycast helper tests.
+Root formatting, typecheck, CLI build, UI production build, and diff checks
+passed. Raycast formatting, typecheck, production build, and a `ray develop`
+compile/import passed. `ray lint` remains blocked only by the existing private
+author lookup returning 404; it also reports that ESLint is not installed and
+therefore skips that check.

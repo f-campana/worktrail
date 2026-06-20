@@ -5,7 +5,8 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
 import {
-  buildWorktrailInvocation,
+  buildInstalledWorktrailInvocation,
+  buildPnpmWorktrailInvocation,
   debugCommandFromError,
   formatDebugCommand,
   sanitizeErrorMessage,
@@ -29,6 +30,10 @@ import {
   resolveWorktrailProjectPath,
 } from "../src/paths.js";
 import type { ResumableTarget } from "../src/types.js";
+import {
+  resolveWorktrailExecutable,
+  WorktrailResolutionError,
+} from "../src/worktrail.js";
 
 const target: ResumableTarget = {
   kind: "run",
@@ -101,6 +106,7 @@ async function withFakeExecution(
       execute,
       homeDirectory,
       resolvePnpmExecutable: async () => "/opt/homebrew/bin/pnpm",
+      resolveWorktrailExecutable: async () => undefined,
     },
   );
 }
@@ -156,8 +162,31 @@ test("selects a declared copy-command action", () => {
   );
 });
 
-test("builds an argument-safe pnpm invocation", () => {
-  const invocation = buildWorktrailInvocation("safe apply; echo nope", {
+test("builds an argument-safe installed executable invocation", () => {
+  const invocation = buildInstalledWorktrailInvocation(
+    "safe apply; echo nope",
+    {
+      databasePath: "/tmp/worktrail.db",
+      resultLimit: "5",
+      includeArchived: true,
+    },
+    "/Users/example/.local/bin/worktrail",
+  );
+  assert.equal(invocation.program, "/Users/example/.local/bin/worktrail");
+  assert.deepEqual(invocation.args, [
+    "resume",
+    "safe apply; echo nope",
+    "--json",
+    "--limit",
+    "5",
+    "--db",
+    "/tmp/worktrail.db",
+    "--include-archived",
+  ]);
+});
+
+test("builds an argument-safe pnpm fallback invocation", () => {
+  const invocation = buildPnpmWorktrailInvocation("safe apply; echo nope", {
     worktrailProjectPath: "/tmp/worktrail project",
     databasePath: "/tmp/worktrail.db",
     resultLimit: "5",
@@ -240,6 +269,7 @@ test("rejects an invalid project path before resolving or spawning pnpm", async 
       undefined,
       {
         homeDirectory: "/Users/private",
+        resolveWorktrailExecutable: async () => undefined,
         resolvePnpmExecutable: async () => {
           resolutionCalls += 1;
           return "/opt/homebrew/bin/pnpm";
@@ -300,6 +330,7 @@ test("resolves project and database paths before argument-safe execution", async
     undefined,
     {
       homeDirectory,
+      resolveWorktrailExecutable: async () => undefined,
       resolvePnpmExecutable: async () => "/opt/homebrew/bin/pnpm",
       execute: async (program, args, cwd) => {
         execution = { program, args, cwd };
@@ -324,6 +355,94 @@ test("resolves project and database paths before argument-safe execution", async
     join(homeDirectory, "Library", "Application Support", "worktrail.db"),
   ]);
   assert.equal(execution.args.includes("~"), false);
+});
+
+test("configured Worktrail executable wins without resolving the development fallback", async () => {
+  const query = "profile github; $(echo nope)";
+  let pnpmResolutionCalls = 0;
+  let execution: { program: string; args: string[]; cwd: string } | undefined;
+  const result = await searchWorktrail(
+    query,
+    {
+      worktrailPath: "~/.local/bin/worktrail",
+      worktrailProjectPath: "~/missing-project",
+      pnpmPath: "/missing/pnpm",
+      resultLimit: "10",
+      includeArchived: true,
+    },
+    undefined,
+    {
+      homeDirectory: "/Users/example",
+      resolveWorktrailExecutable: async (preferredPath) => {
+        assert.equal(preferredPath, "~/.local/bin/worktrail");
+        return "/Users/example/.local/bin/worktrail";
+      },
+      resolvePnpmExecutable: async () => {
+        pnpmResolutionCalls += 1;
+        return "/missing/pnpm";
+      },
+      execute: async (program, args, cwd) => {
+        execution = { program, args, cwd };
+        return JSON.stringify(response({ query, limit: 10 }));
+      },
+    },
+  );
+
+  assert.equal(result.query, query);
+  assert.equal(pnpmResolutionCalls, 0);
+  assert.deepEqual(execution, {
+    program: "/Users/example/.local/bin/worktrail",
+    args: ["resume", query, "--json", "--limit", "10", "--include-archived"],
+    cwd: "/Users/example",
+  });
+});
+
+test("search uses the bare Worktrail PATH fallback", async () => {
+  let program = "";
+  await searchWorktrail(
+    "fast resume",
+    {
+      resultLimit: "5",
+      includeArchived: false,
+    },
+    undefined,
+    {
+      homeDirectory: "/Users/example",
+      resolveWorktrailExecutable: async () => "worktrail",
+      execute: async (executable) => {
+        program = executable;
+        return JSON.stringify(response());
+      },
+    },
+  );
+
+  assert.equal(program, "worktrail");
+});
+
+test("reports a missing Worktrail executable when no development fallback is configured", async () => {
+  const error = await captureError(
+    searchWorktrail(
+      "profile",
+      {
+        worktrailPath: "/missing/worktrail",
+        resultLimit: "5",
+        includeArchived: false,
+      },
+      undefined,
+      {
+        homeDirectory: "/Users/example",
+        resolveWorktrailExecutable: async () => undefined,
+      },
+    ),
+  );
+
+  assert.ok(error instanceof WorktrailResolutionError);
+  assert.match(
+    sanitizeErrorMessage(error),
+    /^Unable to start the Worktrail CLI\./,
+  );
+  assert.match(sanitizeErrorMessage(error), /development fallback/);
+  assert.doesNotMatch(sanitizeErrorMessage(error), /\/Users\/example/);
 });
 
 test("expands and validates an optional database path", async (t) => {
@@ -377,6 +496,7 @@ test("rejects an invalid database path before resolving or spawning pnpm", async
       undefined,
       {
         homeDirectory,
+        resolveWorktrailExecutable: async () => undefined,
         resolvePnpmExecutable: async () => {
           resolutionCalls += 1;
           return "/opt/homebrew/bin/pnpm";
@@ -425,6 +545,34 @@ test("uses the explicit pnpm executable preference first", async () => {
 
   assert.equal(executable, "/custom/bin/pnpm");
   assert.deepEqual(checked, ["/custom/bin/pnpm"]);
+});
+
+test("uses the configured Worktrail executable path first", async () => {
+  const checked: string[] = [];
+  const executable = await resolveWorktrailExecutable(
+    " ~/.local/bin/worktrail ",
+    {
+      environmentPath: "/raycast/bin",
+      homeDirectory: "/Users/example",
+      isExecutable: async (path) => {
+        checked.push(path);
+        return path === "/Users/example/.local/bin/worktrail";
+      },
+    },
+  );
+
+  assert.equal(executable, "/Users/example/.local/bin/worktrail");
+  assert.deepEqual(checked, ["/Users/example/.local/bin/worktrail"]);
+});
+
+test("uses bare worktrail when it is available on Raycast's PATH", async () => {
+  const executable = await resolveWorktrailExecutable(undefined, {
+    environmentPath: "/raycast/bin:/usr/bin",
+    homeDirectory: "/Users/example",
+    isExecutable: async (path) => path === "/raycast/bin/worktrail",
+  });
+
+  assert.equal(executable, "worktrail");
 });
 
 test("uses bare pnpm when it is available on Raycast's PATH", async () => {
@@ -500,15 +648,38 @@ test("reports actionable guidance when pnpm cannot be resolved", async () => {
       return true;
     },
   );
+});
 
-  assert.equal(
-    sanitizeErrorMessage(
-      Object.assign(new Error("spawn pnpm ENOENT"), {
-        code: "ENOENT",
-      }),
-    ),
-    PNPM_RESOLUTION_ERROR_MESSAGE,
+test("reports missing pnpm separately when the development fallback is selected", async (t) => {
+  const homeDirectory = await mkdtemp(join(tmpdir(), "worktrail-raycast-"));
+  t.after(() => rm(homeDirectory, { recursive: true, force: true }));
+  const projectPath = join(homeDirectory, "Documents", "worktrail");
+  await mkdir(projectPath, { recursive: true });
+  await writeFile(
+    join(projectPath, "package.json"),
+    JSON.stringify({ name: "worktrail" }),
   );
+
+  const error = await captureError(
+    searchWorktrail(
+      "profile",
+      {
+        worktrailProjectPath: projectPath,
+        resultLimit: "5",
+        includeArchived: false,
+      },
+      undefined,
+      {
+        homeDirectory,
+        resolveWorktrailExecutable: async () => undefined,
+        resolvePnpmExecutable: async () => {
+          throw new PnpmResolutionError();
+        },
+      },
+    ),
+  );
+
+  assert.equal(sanitizeErrorMessage(error), PNPM_RESOLUTION_ERROR_MESSAGE);
 });
 
 test("reports exit code with bounded sanitized stderr and a debug command", async (t) => {
@@ -626,7 +797,7 @@ test("classifies an unknown exception without exposing multiple lines", () => {
 
 test("formats a home-normalized shell-safe debug command", () => {
   const command = formatDebugCommand(
-    buildWorktrailInvocation(
+    buildPnpmWorktrailInvocation(
       "github profile; echo nope",
       {
         worktrailProjectPath: "/Users/private/Documents/worktrail",
@@ -644,4 +815,24 @@ test("formats a home-normalized shell-safe debug command", () => {
     `/opt/homebrew/bin/pnpm --silent --dir "$HOME/Documents/worktrail" worktrail resume 'github profile; echo nope' --json --limit 5 --db "$HOME/.worktrail/worktrail.db"`,
   );
   assert.doesNotMatch(command, /\/Users\/private/);
+});
+
+test("formats an installed executable debug command without pnpm", () => {
+  const command = formatDebugCommand(
+    buildInstalledWorktrailInvocation(
+      "github profile",
+      {
+        databasePath: "/Users/private/.worktrail/worktrail.db",
+        resultLimit: "5",
+        includeArchived: false,
+      },
+      "/Users/private/.local/bin/worktrail",
+    ),
+    "/Users/private",
+  );
+
+  assert.equal(
+    command,
+    `"$HOME/.local/bin/worktrail" resume 'github profile' --json --limit 5 --db "$HOME/.worktrail/worktrail.db"`,
+  );
 });

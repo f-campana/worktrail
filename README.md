@@ -16,24 +16,67 @@ Fast Resume slice is specified in the
 ## Fast Resume
 
 ```sh
-pnpm worktrail resume "daily report"
-pnpm worktrail resume "control tower" --json
-pnpm worktrail resume "safe apply GUI" --limit 5 --db PATH
+worktrail resume "daily report"
+worktrail resume "control tower" --json
+worktrail resume "safe apply GUI" --limit 5 --db PATH
 ```
 
 `resume` is task-oriented retrieval; `search` remains lower-level evidence
 search and `report` provides time-bounded orientation. Fast Resume returns
 explainable signals and inert, copyable command data but never executes Codex.
 Its JSON omits transcript excerpts, diffs, raw home paths, and credentials.
+Use `pnpm worktrail ...` for the equivalent source-development workflow.
 
 For a keyboard-first private launcher, the repository also includes a thin
 [Raycast extension](extensions/raycast/README.md). It delegates ranking to this
 CLI and only copies declared resume commands; it never executes Codex.
 
+## Build and install the local CLI
+
+Worktrail is packaged as a compiled ESM CLI. TypeScript remains the source of
+truth; `pnpm build` emits `dist/cli.js`, copies the SQLite migrations required
+at runtime, and marks the entry point executable. The package `bin` declaration
+installs it under the command name `worktrail`.
+
+For a private user-local install without publishing:
+
+```sh
+pnpm install
+pnpm build
+npm install --global --prefix "$HOME/.local" .
+```
+
+Add `$HOME/.local/bin` to `PATH` if needed, or call the absolute executable:
+
+```sh
+"$HOME/.local/bin/worktrail" index --help
+"$HOME/.local/bin/worktrail" search "profile" --json
+"$HOME/.local/bin/worktrail" report --since 2026-06-20T00:00:00Z --json
+"$HOME/.local/bin/worktrail" resume "profile" --json --limit 5
+```
+
+Re-run `pnpm build` and the `npm install` command after local source changes.
+For development, `pnpm worktrail ...` remains supported and executes the
+TypeScript source directly.
+
+On Node versions that still label `node:sqlite` experimental, a warning may be
+written to stderr. JSON mode writes only the JSON document to stdout, so clients
+must parse stdout and treat stderr as diagnostics.
+
+### Why not call pnpm forever?
+
+`pnpm --dir <repository> worktrail ...` is acceptable for private dogfood, but
+GUI applications have reduced process environments and nested package-manager
+launchers are fragile there. It also requires a checkout, installed
+dependencies, and pnpm at runtime. A compiled installed executable gives
+Raycast one stable process boundary and is a simpler basis for later
+distribution. The CLI and versioned JSON contract remain the source of truth in
+both modes.
+
 ## Requirements
 
 - Node.js 22.5 or newer, with `node:sqlite`
-- pnpm 10 or newer
+- pnpm 10 or newer for building and development
 
 Install dependencies:
 

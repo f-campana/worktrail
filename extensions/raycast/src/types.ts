@@ -55,8 +55,9 @@ export type ResumeSearchResult = {
 };
 
 export type WorktrailPreferences = {
+  worktrailPath?: string;
   pnpmPath?: string;
-  worktrailProjectPath: string;
+  worktrailProjectPath?: string;
   databasePath?: string;
   resultLimit: string;
   includeArchived: boolean;

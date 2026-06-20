@@ -43,6 +43,7 @@ export default function ResumeWorktrail() {
     pnpmPath,
     resultLimit,
     worktrailProjectPath,
+    worktrailPath,
   } = preferences;
   const [searchText, setSearchText] = useState("");
   const [state, setState] = useState<ViewState>({ status: "idle" });
@@ -65,6 +66,7 @@ export default function ResumeWorktrail() {
           pnpmPath,
           resultLimit,
           worktrailProjectPath,
+          worktrailPath,
         },
         controller.signal,
       )
@@ -78,7 +80,8 @@ export default function ResumeWorktrail() {
           setState({
             status: "error",
             message: sanitizeErrorMessage(error, [
-              worktrailProjectPath,
+              worktrailPath ?? "",
+              worktrailProjectPath ?? "",
               databasePath ?? "",
             ]),
             ...(debugCommand ? { debugCommand } : {}),
@@ -97,6 +100,7 @@ export default function ResumeWorktrail() {
     query,
     resultLimit,
     worktrailProjectPath,
+    worktrailPath,
   ]);
 
   const result = state.status === "success" ? state.result : undefined;

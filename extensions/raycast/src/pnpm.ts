@@ -12,7 +12,7 @@ const STANDARD_MACOS_EXECUTABLE_PATHS = [
 ];
 
 export const PNPM_RESOLUTION_ERROR_MESSAGE =
-  "Unable to start pnpm. Raycast may not inherit your terminal PATH. Run `which pnpm` in Terminal, then set “pnpm executable path” in this command’s preferences. Tried: pnpm, /opt/homebrew/bin/pnpm, /usr/local/bin/pnpm, ~/Library/pnpm/pnpm.";
+  "Unable to start the pnpm development fallback. Raycast may not inherit your terminal PATH. Run `which pnpm` in Terminal, then set “pnpm executable path (development fallback)” in this command’s preferences. Tried: pnpm, /opt/homebrew/bin/pnpm, /usr/local/bin/pnpm, ~/Library/pnpm/pnpm.";
 
 type ExecutableProbe = (path: string) => Promise<boolean>;
 

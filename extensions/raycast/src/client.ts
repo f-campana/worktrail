@@ -20,6 +20,10 @@ import {
   WorktrailProjectPathError,
 } from "./paths.js";
 import type { ResumeSearchResult, WorktrailPreferences } from "./types.js";
+import {
+  resolveWorktrailExecutable,
+  WorktrailResolutionError,
+} from "./worktrail.js";
 
 const MAX_OUTPUT_BYTES = 1_000_000;
 const SEARCH_TIMEOUT_MS = 15_000;
@@ -56,38 +60,63 @@ class WorktrailTimeoutError extends Error {
   }
 }
 
+class WorktrailSpawnError extends Error {
+  constructor(readonly mode: "installed" | "pnpm") {
+    super(`Unable to spawn the ${mode} Worktrail invocation.`);
+    this.name = "WorktrailSpawnError";
+  }
+}
+
 type SearchDependencies = {
   execute?: typeof execute;
   homeDirectory?: string;
   resolvePnpmExecutable?: typeof resolvePnpmExecutable;
+  resolveWorktrailExecutable?: typeof resolveWorktrailExecutable;
 };
 
-export function buildWorktrailInvocation(
+export function buildInstalledWorktrailInvocation(
   query: string,
   preferences: WorktrailPreferences,
+  program = "worktrail",
+): { program: string; args: string[] } {
+  return {
+    program,
+    args: buildResumeArgs(query, preferences),
+  };
+}
+
+export function buildPnpmWorktrailInvocation(
+  query: string,
+  preferences: WorktrailPreferences & { worktrailProjectPath: string },
   program = "pnpm",
 ): { program: string; args: string[] } {
+  return {
+    program,
+    args: [
+      "--silent",
+      "--dir",
+      preferences.worktrailProjectPath,
+      "worktrail",
+      ...buildResumeArgs(query, preferences),
+    ],
+  };
+}
+
+function buildResumeArgs(
+  query: string,
+  preferences: WorktrailPreferences,
+): string[] {
   const limit = Number.parseInt(preferences.resultLimit, 10);
   if (!Number.isInteger(limit) || limit < 1 || limit > 20) {
     throw new Error("Result limit must be between 1 and 20.");
   }
 
-  const args = [
-    "--silent",
-    "--dir",
-    preferences.worktrailProjectPath,
-    "worktrail",
-    "resume",
-    query,
-    "--json",
-    "--limit",
-    String(limit),
-  ];
+  const args = ["resume", query, "--json", "--limit", String(limit)];
   if (preferences.databasePath?.trim()) {
     args.push("--db", preferences.databasePath);
   }
   if (preferences.includeArchived) args.push("--include-archived");
-  return { program, args };
+  return args;
 }
 
 export async function searchWorktrail(
@@ -97,34 +126,59 @@ export async function searchWorktrail(
   dependencies: SearchDependencies = {},
 ): Promise<ResumeSearchResult> {
   const homeDirectory = dependencies.homeDirectory ?? homedir();
-  const worktrailProjectPath = await resolveWorktrailProjectPath(
-    preferences.worktrailProjectPath,
-    homeDirectory,
-  );
   const databasePath = await resolveOptionalDatabasePath(
     preferences.databasePath,
     homeDirectory,
   );
-  const pnpmExecutable = await (
-    dependencies.resolvePnpmExecutable ?? resolvePnpmExecutable
-  )(preferences.pnpmPath);
-  const invocation = buildWorktrailInvocation(
-    query,
-    { ...preferences, databasePath, worktrailProjectPath },
-    pnpmExecutable,
-  );
+  const installedExecutable = await (
+    dependencies.resolveWorktrailExecutable ?? resolveWorktrailExecutable
+  )(preferences.worktrailPath, { homeDirectory });
+  let mode: "installed" | "pnpm";
+  let cwd: string;
+  let invocation: { program: string; args: string[] };
+  if (installedExecutable) {
+    mode = "installed";
+    cwd = homeDirectory;
+    invocation = buildInstalledWorktrailInvocation(
+      query,
+      { ...preferences, databasePath },
+      installedExecutable,
+    );
+  } else if (preferences.worktrailProjectPath?.trim()) {
+    mode = "pnpm";
+    const worktrailProjectPath = await resolveWorktrailProjectPath(
+      preferences.worktrailProjectPath,
+      homeDirectory,
+    );
+    const pnpmExecutable = await (
+      dependencies.resolvePnpmExecutable ?? resolvePnpmExecutable
+    )(preferences.pnpmPath, { homeDirectory });
+    cwd = worktrailProjectPath;
+    invocation = buildPnpmWorktrailInvocation(
+      query,
+      { ...preferences, databasePath, worktrailProjectPath },
+      pnpmExecutable,
+    );
+  } else {
+    throw new WorktrailResolutionError(
+      preferences.worktrailPath,
+      homeDirectory,
+    );
+  }
   const debugCommand = formatDebugCommand(invocation, homeDirectory);
   let stdout: string;
   try {
     stdout = await (dependencies.execute ?? execute)(
       invocation.program,
       invocation.args,
-      worktrailProjectPath,
+      cwd,
       signal,
       homeDirectory,
     );
   } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") throw error;
+    if (isNodeError(error) && error.code === "ENOENT") {
+      throw new WorktrailSpawnError(mode);
+    }
     if (isNodeError(error) && error.code === "ABORT_ERR") throw error;
     if (
       (isNodeError(error) && error.killed) ||
@@ -213,15 +267,19 @@ export function sanitizeErrorMessage(
   if (
     error instanceof WorktrailProjectPathError ||
     error instanceof DatabasePathError ||
-    error instanceof FilesystemPreferencePathError
+    error instanceof FilesystemPreferencePathError ||
+    error instanceof WorktrailResolutionError
   ) {
     return error.message.replace(/\s+/g, " ").trim().slice(0, 480);
   }
   if (
     error instanceof PnpmResolutionError ||
-    (isNodeError(error) && error.code === "ENOENT")
+    (error instanceof WorktrailSpawnError && error.mode === "pnpm")
   ) {
     return PNPM_RESOLUTION_ERROR_MESSAGE;
+  }
+  if (error instanceof WorktrailSpawnError) {
+    return new WorktrailResolutionError().message;
   }
   if (error instanceof WorktrailTimeoutError) {
     return boundedErrorMessage(
