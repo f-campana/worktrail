@@ -8,10 +8,22 @@ import {
   pnpmExecutionEnvironment,
   resolvePnpmExecutable,
 } from "./pnpm.js";
+import {
+  FilesystemPreferencePathError,
+  resolveOptionalDatabasePath,
+  resolveWorktrailProjectPath,
+  WorktrailProjectPathError,
+} from "./paths.js";
 import type { ResumeSearchResult, WorktrailPreferences } from "./types.js";
 
 const MAX_OUTPUT_BYTES = 1_000_000;
 const SEARCH_TIMEOUT_MS = 15_000;
+
+type SearchDependencies = {
+  execute?: typeof execute;
+  homeDirectory?: string;
+  resolvePnpmExecutable?: typeof resolvePnpmExecutable;
+};
 
 export function buildWorktrailInvocation(
   query: string,
@@ -45,17 +57,29 @@ export async function searchWorktrail(
   query: string,
   preferences: WorktrailPreferences,
   signal?: AbortSignal,
+  dependencies: SearchDependencies = {},
 ): Promise<ResumeSearchResult> {
-  const pnpmExecutable = await resolvePnpmExecutable(preferences.pnpmPath);
+  const homeDirectory = dependencies.homeDirectory ?? homedir();
+  const worktrailProjectPath = await resolveWorktrailProjectPath(
+    preferences.worktrailProjectPath,
+    homeDirectory,
+  );
+  const databasePath = resolveOptionalDatabasePath(
+    preferences.databasePath,
+    homeDirectory,
+  );
+  const pnpmExecutable = await (
+    dependencies.resolvePnpmExecutable ?? resolvePnpmExecutable
+  )(preferences.pnpmPath);
   const invocation = buildWorktrailInvocation(
     query,
-    preferences,
+    { ...preferences, databasePath, worktrailProjectPath },
     pnpmExecutable,
   );
-  const stdout = await execute(
+  const stdout = await (dependencies.execute ?? execute)(
     invocation.program,
     invocation.args,
-    preferences.worktrailProjectPath,
+    worktrailProjectPath,
     signal,
   );
 
@@ -87,9 +111,15 @@ function execute(
         signal,
         windowsHide: true,
       },
-      (error, stdout) => {
-        if (error) reject(error);
-        else resolve(stdout);
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(
+            Object.assign(error, {
+              stderr: typeof stderr === "string" ? stderr : "",
+              stdout: typeof stdout === "string" ? stdout : "",
+            }),
+          );
+        } else resolve(stdout);
       },
     );
   });
@@ -99,6 +129,12 @@ export function sanitizeErrorMessage(
   error: unknown,
   privatePaths: string[] = [],
 ): string {
+  if (
+    error instanceof WorktrailProjectPathError ||
+    error instanceof FilesystemPreferencePathError
+  ) {
+    return error.message.replace(/\s+/g, " ").trim().slice(0, 480);
+  }
   if (
     error instanceof PnpmResolutionError ||
     (isNodeError(error) && error.code === "ENOENT")
@@ -110,7 +146,9 @@ export function sanitizeErrorMessage(
   }
 
   const stderr = errorField(error, "stderr");
-  const message = stderr || (error instanceof Error ? error.message : "");
+  const stdout = errorField(error, "stdout");
+  const fallbackMessage = error instanceof Error ? error.message : "";
+  const message = stderr || stdout || fallbackMessage;
   const firstLine = message
     .replace(/\u001b\[[0-9;]*m/g, "")
     .split(/\r?\n/)
@@ -133,6 +171,9 @@ export function sanitizeErrorMessage(
     .replace(/\/home\/[^/\s]+/g, "~")
     .replace(/\s+/g, " ")
     .trim();
+  if (/^command failed:/i.test(sanitized)) {
+    return "Worktrail command failed. Check the Worktrail project path and database path preferences.";
+  }
   return sanitized.slice(0, 240) || "Worktrail search failed.";
 }
 

@@ -84,6 +84,43 @@ environment has no Raycast UI automation access. A user pass is still required
 to confirm the configured executable inside the native command. The extension
 continues to depend on pnpm until an installed Worktrail binary mode is added.
 
+## Live user test: project path passed as literal ~
+
+After pnpm executable resolution was fixed, a live search started pnpm but
+failed with a sanitized command containing `--dir ~`. The configured
+**Worktrail project path** was `~`. Because the extension deliberately uses
+shell-free argument-array execution, no shell expanded that token; pnpm
+received a literal `~` directory.
+
+The extension now expands `~` and `~/...` filesystem preferences with the local
+home-directory API. It applies the same expansion to the optional database
+path. Before resolving or spawning pnpm, it requires the resulting project path
+to be a directory with a parseable Worktrail `package.json`. Invalid values
+produce an actionable, home-normalized preference error instead of a generic
+command failure. Unsupported other-user forms such as `~otheruser/...` are
+rejected, and execution remains shell-free.
+
+Automated helper coverage verifies expansion, pre-spawn rejection, resolved
+`--dir` and `--db` arguments, home-normalized errors, and argument-safe queries.
+Post-fix root formatting, typecheck, 45 tests, UI build, and diff checks passed.
+The extension formatting, typecheck, 20 helper tests, production build, and a
+`ray develop` compile/import also passed; the development process was then
+intentionally stopped. `ray lint` remains blocked by the known private-author
+lookup and missing-ESLint limitation.
+
+A structural check through the actual extension client with
+`~/Documents/worktrail` returned five results for `github profile`, `profile
+github`, and `fast resume`; each top target exposed a copy-command action. A
+guaranteed no-result query returned a clean zero-target response. A native user
+pass is still required to verify the preference and rendering inside Raycast.
+Recommended values are the absolute result of `which pnpm` and
+`~/Documents/worktrail` (or the absolute repository path).
+
+The remaining limitation is that Worktrail must still be run from a local
+repository through pnpm; there is no installed-binary mode. A value of `~`
+correctly resolves to the home directory but is rejected unless that directory
+itself contains Worktrail's `package.json`.
+
 ## Privacy and safety observations
 
 - The structural capture contained no target titles, source IDs, evidence

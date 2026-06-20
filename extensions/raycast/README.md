@@ -33,10 +33,12 @@ hotkey for **Resume Worktrail** if desired.
 
 - **pnpm executable path** (optional): absolute path to `pnpm`. Leave empty to
   use automatic resolution.
-- **Worktrail Project Path** (required): the repository containing the
-  `worktrail` pnpm script.
-- **Database Path** (optional): passed to Worktrail as `--db PATH`. If omitted,
-  Worktrail uses its normal default database.
+- **Worktrail Project Path** (required): the repository folder containing
+  Worktrail's `package.json`. `~` and `~/...` paths are supported; for example,
+  `~/Documents/worktrail`.
+- **Database Path** (optional): passed to Worktrail as `--db PATH`. `~` and
+  `~/...` paths are supported. If omitted, Worktrail uses its normal default
+  database.
 - **Result Limit**: 3, 5 (default), 10, or 20.
 - **Include archived runs**: disabled by default.
 
@@ -44,8 +46,10 @@ hotkey for **Resume Worktrail** if desired.
 
 For non-empty search text, the extension safely resolves `pnpm` from the
 configured absolute path, Raycast's `PATH`, or common installation paths. It
-then uses argument-array process execution; the query is never interpolated
-into a shell command. Conceptually it invokes:
+expands local project/database path preferences without invoking a shell,
+validates the project directory, and then uses argument-array process
+execution. The query is never interpolated into a shell command. Conceptually
+it invokes:
 
 ```text
 pnpm --silent --dir <project-path> worktrail resume <query> --json --limit <limit>
@@ -98,6 +102,22 @@ The extension intentionally does not invoke `/bin/zsh -lc`: direct executable
 resolution keeps project paths and search queries as separate process
 arguments. A future packaged Worktrail binary may remove the pnpm dependency.
 
+### Worktrail project path
+
+Set **Worktrail Project Path** to the repository folder, normally
+`~/Documents/worktrail` or its absolute path. The extension supports `~` and
+`~/...`, resolves them internally, and requires the selected directory to
+contain Worktrail's `package.json`.
+
+If an older extension reports a command failure containing `--dir ~`, update
+to the latest version or set the full absolute repository path. A value of `~`
+alone refers to the home directory, not the Worktrail checkout, unless the
+repository itself is located there.
+
+The pnpm executable is configured separately. Run `which pnpm` when Raycast
+cannot locate it, then copy that command's absolute result into **pnpm
+executable path**.
+
 ## Privacy
 
 - Searches and results stay local; the extension performs no uploads or network
@@ -121,6 +141,11 @@ pnpm format:check
 ```
 
 `pnpm build` runs Raycast's production extension build without publishing.
+`ray lint` is currently blocked for this private extension because Raycast's
+author lookup returns 404 for the configured private author; the lint command
+also reports that ESLint is not installed. Prettier, TypeScript, helper tests,
+and the production build remain the enforced local checks.
+
 Current API and workflow references are the official Raycast documentation for
 [file structure](https://developers.raycast.com/information/file-structure),
 [preferences](https://developers.raycast.com/api-reference/preferences),
@@ -131,6 +156,8 @@ and the [Raycast CLI](https://developers.raycast.com/information/developer-tools
 
 - Invocation currently supports the repository's pnpm script, not a separately
   installed `worktrail` binary.
+- The project path must point at the repository root; parent directories and
+  arbitrary packages are rejected before pnpm starts.
 - A local pnpm installation is still required, either discoverable by Raycast
   or selected in command preferences.
 - Confidence is displayed as supplied by Worktrail; it is not a calibrated

@@ -33,7 +33,7 @@
         {
           "name": "worktrailProjectPath",
           "title": "Worktrail Project Path",
-          "description": "Repository containing the Worktrail pnpm script.",
+          "description": "Path to the Worktrail repository folder. `~` and `~/...` are supported. Example: `~/Documents/worktrail`. This should be the folder containing Worktrail’s `package.json`.",
           "type": "directory",
           "required": true
         },
