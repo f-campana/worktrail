@@ -123,5 +123,71 @@
     "codexExecuted": false,
     "screenshotsRetained": false,
     "screenshotPolicy": "The supplied cropped failure and success screenshots were reviewed but not copied into the repository because they contain a command UUID or unrelated desktop content. Temporary full-screen captures were deleted."
+  },
+  "installedExecutableNativeClosingPass": {
+    "completedAt": "2026-06-21",
+    "executable": "~/.local/bin/worktrail",
+    "database": "default",
+    "schemaVersion": 1,
+    "stderrEmpty": true,
+    "raycastArgument": "What you remember",
+    "alias": "resume",
+    "aliasArgumentModeConfirmed": true,
+    "uninterruptedRootPhraseReliable": false,
+    "hotkeyRecommended": true,
+    "queries": [
+      {
+        "query": "profile",
+        "state": "results",
+        "resultCount": 5,
+        "topTitle": "Plan | fabien-campana.dev launch",
+        "topConfidence": "high",
+        "primaryAction": "open-codex"
+      },
+      {
+        "query": "github profile",
+        "state": "results",
+        "resultCount": 5,
+        "topTitle": "Plan | fabien-campana.dev launch",
+        "topConfidence": "high",
+        "primaryAction": "open-codex"
+      },
+      {
+        "query": "fast resume",
+        "state": "results",
+        "resultCount": 5,
+        "topTitle": "Validate resume usefulness",
+        "topConfidence": "high",
+        "primaryAction": "open-codex"
+      },
+      {
+        "query": "worktrail",
+        "state": "results",
+        "resultCount": 5,
+        "topTitle": "Validate resume usefulness",
+        "topConfidence": "high",
+        "primaryAction": "open-codex"
+      },
+      {
+        "query": "shipready",
+        "state": "empty",
+        "resultCount": 0
+      },
+      {
+        "query": "zzzznonexistenttoken987654",
+        "state": "empty",
+        "resultCount": 0
+      }
+    ],
+    "copyActionVisible": true,
+    "copyValuesMatchDeclaredResumeCommands": true,
+    "directOpen": {
+      "supported": true,
+      "mechanism": "codex://threads/<session-uuid>",
+      "exactSelectedThreadOpened": true,
+      "startedAgentWork": false
+    },
+    "readyToMerge": true,
+    "recommendedNextTask": "Focused ranking evaluation for broad versus intent-qualified queries."
   }
 }

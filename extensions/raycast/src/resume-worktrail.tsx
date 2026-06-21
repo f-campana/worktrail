@@ -5,6 +5,7 @@ import {
   getPreferenceValues,
   Icon,
   List,
+  type LaunchProps,
   openCommandPreferences,
 } from "@raycast/api";
 import { useEffect, useState } from "react";
@@ -35,7 +36,11 @@ type ViewState =
   | { status: "success"; result: ResumeSearchResult }
   | { status: "error"; message: string; debugCommand?: string };
 
-export default function ResumeWorktrail() {
+type ResumeWorktrailArguments = { query?: string };
+
+export default function ResumeWorktrail(
+  props: LaunchProps<{ arguments: ResumeWorktrailArguments }>,
+) {
   const preferences = getPreferenceValues<WorktrailPreferences>();
   const {
     databasePath,
@@ -45,7 +50,7 @@ export default function ResumeWorktrail() {
     worktrailProjectPath,
     worktrailPath,
   } = preferences;
-  const [searchText, setSearchText] = useState("");
+  const [searchText, setSearchText] = useState(props.arguments.query ?? "");
   const [state, setState] = useState<ViewState>({ status: "idle" });
   const query = searchText.trim();
 
@@ -230,23 +235,25 @@ function TargetItem({
             ]
           : []),
         {
-          icon: display.resumable ? Icon.Clipboard : Icon.XMarkCircle,
-          tooltip: display.resumable
-            ? "Resume command available"
-            : "No resume command available",
+          icon: display.opensInCodex
+            ? Icon.AppWindow
+            : display.resumable
+              ? Icon.Clipboard
+              : Icon.XMarkCircle,
+          tooltip: display.opensInCodex
+            ? "Exact Codex thread can be opened"
+            : display.resumable
+              ? "Resume command available"
+              : "No resume command available",
         },
       ]}
       actions={
         <ActionPanel>
           <ActionPanel.Section title="Declared Worktrail Actions">
             {actions.map((action, index) => (
-              <Action.CopyToClipboard
+              <DeclaredAction
                 key={`${action.kind}:${action.value}:${index}`}
-                content={action.value}
-                icon={
-                  action.kind === "copy-command" ? Icon.Terminal : Icon.Hashtag
-                }
-                title={sanitizeDisplayText(action.label)}
+                action={action}
               />
             ))}
           </ActionPanel.Section>
@@ -276,6 +283,29 @@ function TargetItem({
       icon={target.kind === "run" ? Icon.Terminal : Icon.Folder}
       subtitle={display.subtitle}
       title={displayTitle}
+    />
+  );
+}
+
+function DeclaredAction({
+  action,
+}: {
+  action: ResumableTarget["openActions"][number];
+}) {
+  if (action.kind === "open-codex") {
+    return (
+      <Action.Open
+        icon={Icon.AppWindow}
+        target={action.value}
+        title={sanitizeDisplayText(action.label)}
+      />
+    );
+  }
+  return (
+    <Action.CopyToClipboard
+      content={action.value}
+      icon={action.kind === "copy-command" ? Icon.Terminal : Icon.Hashtag}
+      title={sanitizeDisplayText(action.label)}
     />
   );
 }

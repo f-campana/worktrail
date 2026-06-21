@@ -15,7 +15,7 @@ export type RelatedRun = {
 };
 
 export type ResumeOpenAction = {
-  kind: "copy-command" | "copy-id";
+  kind: "open-codex" | "copy-command" | "copy-id";
   label: string;
   value: string;
 };

@@ -313,3 +313,101 @@ passed. Raycast formatting, typecheck, production build, and a `ray develop`
 compile/import passed. `ray lint` remains blocked only by the existing private
 author lookup returning 404; it also reports that ESLint is not installed and
 therefore skips that check.
+
+## Installed executable native closing pass + Codex open investigation
+
+Validated on 2026-06-21. Worktrail was built and installed at
+`~/.local/bin/worktrail`; its default-database `resume` output used schema 1,
+clean JSON stdout, empty stderr, and declared `open-codex` before
+`copy-command`. The existing native Raycast setup remained in the
+installed-executable branch with project/pnpm preferences absent from the
+earlier installed-path pass. The database preference remained empty, so
+Worktrail used `~/.worktrail/worktrail.db`; the earlier explicit-database check
+had already produced identical results.
+
+### Keyboard-first behavior
+
+Raycast supports command aliases, global hotkeys, and manifest arguments. The
+command now declares one optional text argument, **What you remember**. Native
+screenshots confirmed that the alias `resume` exposes this argument and that
+`github profile` reaches the extension search field and returns five ranked
+targets. They also exposed an interaction boundary: typing `resume github
+profile` as one uninterrupted Root Search string can remain an ordinary root
+query. The reliable alias flow is to type `resume`, let Raycast enter the
+argument field (alias plus space), then type the query and press Enter.
+
+A dedicated hotkey is the shortest reliable route because it opens **Resume
+Worktrail** directly and focuses its internal search. A Script Command would
+add another launcher and shell boundary while losing the native ranked detail
+view; it is not a better fit now that the extension has a supported argument.
+
+### Direct Codex opening
+
+Local `codex --help`, `codex resume --help`, and `codex app --help` established
+that `codex resume <UUID>` resumes in the terminal TUI and `codex app [PATH]`
+opens a workspace, not a selected thread. The installed app alone can be
+launched with `open -a Codex`, but that does not select the target.
+
+The current official Codex app command reference documents the canonical
+`codex://threads/<thread-id>` deep link, with the session UUID as `thread-id`.
+Worktrail now declares this inert URL only after the same UUID validation used
+for its resume command. Raycast additionally requires that the URL be a
+UUID-shaped `codex://threads/` URL exactly matching the selected target's
+`resumeRef`, then renders it through native `Action.Open`. It does not construct
+URLs, invoke a shell, or run Codex CLI.
+
+Controlled local testing opened the top `github profile` result. Codex selected
+the exact **Plan | fabien-campana.dev launch** thread shown by Worktrail. The
+composer remained empty and no new turn or agent work started. This is outcome
+A: exact-thread open is supported and verified, so **Open in Codex** is the
+primary Enter action. **Copy Codex resume command** remains secondary.
+
+### Query and action pass
+
+The installed executable produced the following default-database results. The
+native `github profile` view confirmed five targets, visible high confidence,
+the selected target detail, and **Open in Codex** as the primary action. The
+earlier native clipboard pass remains applicable to the same native
+`Action.CopyToClipboard` path: its pasted value exactly matched the selected
+target's declared `resumeCommand` without being executed.
+
+| Query                        | State   | Top result                          | Confidence | Primary action | Assessment                       |
+| ---------------------------- | ------- | ----------------------------------- | ---------- | -------------- | -------------------------------- |
+| `profile`                    | results | `Plan \| fabien-campana.dev launch` | high       | Open in Codex  | plausible but broad/noisy        |
+| `github profile`             | results | `Plan \| fabien-campana.dev launch` | high       | Open in Codex  | plausible; exact thread verified |
+| `fast resume`                | results | `Validate resume usefulness`        | high       | Open in Codex  | correct/plausible                |
+| `worktrail`                  | results | `Validate resume usefulness`        | high       | Open in Codex  | plausible but broad              |
+| `shipready`                  | empty   | —                                   | —          | —              | clean empty state                |
+| `zzzznonexistenttoken987654` | empty   | —                                   | —          | —              | guaranteed clean empty state     |
+
+Every result-bearing top target declared a secondary copy action. Installed-CLI
+checks confirmed that each copy value exactly matched its target's declared
+`resumeCommand`; the native action remains visible behind the primary open
+action. No Codex command was executed.
+
+### Speed and friction
+
+The reliable alias path is roughly: open Raycast, enter `resume` argument mode,
+type the query, open results, press Enter on the target. A dedicated command
+hotkey removes the Root Search/alias transition: hotkey, type query, Enter.
+Codex sidebar search requires switching to Codex, opening thread search, typing
+the query, and selecting a result. The hotkey route is materially shorter; the
+alias route is similar in interaction count but benefits from Worktrail's
+ranked signals and now lands directly on the exact thread. Copy-only resume was
+too indirect for the intended loop, but it is useful as a fallback.
+
+Broad `profile` remains noisy and overconfident: it returns the same top target
+as `github profile`. This is a ranking follow-up, deliberately outside this
+pass. The extension is ready to merge for the intended fast-resume loop. The
+recommended next task is a focused ranking evaluation for broad versus
+intent-qualified queries, not more launcher or packaging work.
+
+### Final validation
+
+- Root: format check, typecheck, 46/46 tests, UI production build, and
+  `git diff --check` passed.
+- Raycast: format check, typecheck, 37/37 tests, production build, and native
+  `ray develop` compile/import passed.
+- `ray lint` remains non-enforced for this private extension: Raycast's author
+  lookup returns 404 for `fabiencampana`, and ESLint is not installed. Its
+  Prettier phase passed independently through the enforced format check.

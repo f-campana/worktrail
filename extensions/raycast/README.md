@@ -1,9 +1,11 @@
 # Worktrail for Raycast
 
 This private Raycast extension provides one command, **Resume Worktrail**. It
-searches Worktrail's versioned Fast Resume JSON contract and copies inert Codex
-resume commands. Raycast is only a client: ranking, confidence, signals,
-archive filtering, and command construction remain owned by Worktrail.
+searches Worktrail's versioned Fast Resume JSON contract and opens exact local
+Codex threads when Worktrail declares a verified deep link. Copying an inert
+Codex resume command remains the secondary fallback. Raycast is only a client:
+ranking, confidence, signals, archive filtering, and action construction remain
+owned by Worktrail.
 
 ## Requirements
 
@@ -35,8 +37,16 @@ it has been imported, stop the development process if desired; the command
 remains available in Raycast. This extension is intentionally local/private and
 is not configured for the public Raycast Store.
 
-In Raycast, open **Extensions**, select **Worktrail**, and configure a global
-hotkey for **Resume Worktrail** if desired.
+In Raycast, assign the alias `resume` to **Resume Worktrail**. Type the alias,
+enter its **What you remember** argument, and press Enter to open the ranked
+results. Raycast's documented alias behavior focuses the first argument after
+`resume` plus a space. In native testing, entering alias argument mode first was
+reliable; typing the entire phrase as undifferentiated Root Search text could
+remain a normal root query instead of passing `github profile` to Worktrail.
+
+For the shortest reliable path, configure a global hotkey for **Resume
+Worktrail**. The hotkey opens the command directly; type the query and press
+Enter on the selected target.
 
 ## Preferences
 
@@ -100,10 +110,13 @@ The error action **Copy Debug Command** copies the shell-safe equivalent for a
 manual Terminal comparison. JSON parse, schema/version, timeout, preference,
 spawn, and unknown failures are classified separately.
 
-The primary action copies `codex resume <SESSION_ID>` when Worktrail declares
-it. Secondary actions can copy a declared ID, the resume UUID, or the target
-title. The extension never runs Codex, opens Terminal, mutates Worktrail, or
-reimplements ranking.
+The primary action opens `codex://threads/<SESSION_ID>` when Worktrail declares
+that exact-thread action. The extension accepts only a UUID-shaped Codex thread
+URL matching the selected target's resume reference. The secondary action
+copies `codex resume <SESSION_ID>`; other actions can copy a declared ID, the
+resume UUID, or the target title. Opening the thread does not submit a prompt or
+start agent work. The extension never runs Codex CLI, opens Terminal, mutates
+Worktrail, or reimplements ranking.
 
 ## Troubleshooting
 
@@ -227,9 +240,13 @@ and the production build remain the enforced local checks.
 
 Current API and workflow references are the official Raycast documentation for
 [file structure](https://developers.raycast.com/information/file-structure),
+[arguments](https://developers.raycast.com/information/lifecycle/arguments),
+[aliases and hotkeys](https://manual.raycast.com/command-aliases-and-hotkeys),
 [preferences](https://developers.raycast.com/api-reference/preferences),
 [actions](https://developers.raycast.com/api-reference/user-interface/actions),
 and the [Raycast CLI](https://developers.raycast.com/information/developer-tools/cli).
+The exact-thread URL is documented in the official
+[Codex app deep-link reference](https://developers.openai.com/codex/app/commands#deep-links).
 
 ## Current limitations
 
@@ -242,3 +259,6 @@ and the [Raycast CLI](https://developers.raycast.com/information/developer-tools
 - Candidate workstreams appear if the CLI returns them, but Worktrail does not
   currently generate them.
 - The extension does not provide workstream correction or GUI navigation.
+- Raycast must recognize the `resume` alias before it can route following text
+  into the command argument; a dedicated hotkey avoids that Root Search timing
+  boundary.

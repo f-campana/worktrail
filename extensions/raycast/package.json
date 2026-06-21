@@ -3,7 +3,7 @@
   "title": "Worktrail",
   "version": "0.1.0",
   "private": true,
-  "description": "Search Worktrail and copy inert Codex resume commands from Raycast.",
+  "description": "Search Worktrail and open exact Codex threads from Raycast.",
   "icon": "icon.png",
   "author": "fabiencampana",
   "license": "MIT",
@@ -19,8 +19,16 @@
       "name": "resume-worktrail",
       "title": "Resume Worktrail",
       "subtitle": "Worktrail",
-      "description": "Search ranked Worktrail targets and copy a Codex resume command.",
+      "description": "Search ranked Worktrail targets and open the exact Codex thread.",
       "mode": "view",
+      "arguments": [
+        {
+          "name": "query",
+          "placeholder": "What you remember",
+          "type": "text",
+          "required": false
+        }
+      ],
       "preferences": [
         {
           "name": "worktrailPath",

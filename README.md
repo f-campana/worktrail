@@ -28,8 +28,10 @@ Its JSON omits transcript excerpts, diffs, raw home paths, and credentials.
 Use `pnpm worktrail ...` for the equivalent source-development workflow.
 
 For a keyboard-first private launcher, the repository also includes a thin
-[Raycast extension](extensions/raycast/README.md). It delegates ranking to this
-CLI and only copies declared resume commands; it never executes Codex.
+[Raycast extension](extensions/raycast/README.md). It delegates ranking and
+action construction to this CLI. A declared `codex://threads/<UUID>` action
+opens the exact local Codex thread; the inert `codex resume <UUID>` command
+remains available as a copy fallback. Neither path starts a Codex turn.
 
 ## Build and install the local CLI
 

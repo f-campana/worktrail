@@ -131,7 +131,7 @@ function parseOpenAction(input: unknown, path: string): ResumeOpenAction {
   return {
     kind: oneOf(
       value.kind,
-      ["copy-command", "copy-id"] as const,
+      ["open-codex", "copy-command", "copy-id"] as const,
       `${path}.kind`,
     ),
     label: string(value.label, `${path}.label`),

@@ -16,7 +16,12 @@ import {
   parseResumeSearchResult,
   ResumeCompatibilityError,
 } from "../src/contract.js";
-import { deriveTargetDisplay, selectCopyCommand } from "../src/display.js";
+import {
+  deriveTargetDisplay,
+  selectCodexOpenAction,
+  selectCopyCommand,
+  targetActions,
+} from "../src/display.js";
 import {
   PNPM_RESOLUTION_ERROR_MESSAGE,
   PnpmResolutionError,
@@ -60,6 +65,11 @@ const target: ResumableTarget = {
     },
   ],
   openActions: [
+    {
+      kind: "open-codex",
+      label: "Open in Codex",
+      value: "codex://threads/0197f0de-1111-7000-8000-000000000001",
+    },
     {
       kind: "copy-command",
       label: "Copy Codex resume command",
@@ -148,10 +158,29 @@ test("derives compact display metadata", () => {
   assert.match(display.subtitle, /^High confidence · Run · /);
   assert.deepEqual(display.relatedFiles, ["src/resume.ts"]);
   assert.equal(display.resumable, true);
+  assert.equal(display.opensInCodex, true);
+});
+
+test("selects only the declared exact-thread Codex action", () => {
+  assert.equal(selectCodexOpenAction(target), target.openActions[0]);
+  assert.equal(
+    selectCodexOpenAction({
+      ...target,
+      openActions: [
+        {
+          kind: "open-codex",
+          label: "Open in Codex",
+          value: "https://example.com/not-codex",
+        },
+      ],
+    }),
+    undefined,
+  );
+  assert.deepEqual(targetActions(target), target.openActions);
 });
 
 test("selects a declared copy-command action", () => {
-  assert.equal(selectCopyCommand(target), target.openActions[0]);
+  assert.equal(selectCopyCommand(target), target.openActions[1]);
   assert.equal(
     selectCopyCommand({
       ...target,
