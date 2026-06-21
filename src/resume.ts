@@ -2,7 +2,7 @@ import type { WorktrailDatabase } from "./db/database.js";
 import { queryTerms, searchThreads, type SearchResult } from "./search.js";
 
 export const RESUME_SEARCH_SCHEMA_VERSION = 1 as const;
-export const RESUME_SCORE_VERSION = 1 as const;
+export const RESUME_SCORE_VERSION = 2 as const;
 
 export type ResumeSignal = {
   type: string;
@@ -27,6 +27,7 @@ export type ResumableTarget = {
   command?: { program: "codex"; args: string[] };
   lastActivity: string;
   sourceTool?: string;
+  archived?: boolean;
   confidence: "high" | "medium" | "low";
   score: number;
   scoreVersion: typeof RESUME_SCORE_VERSION;
@@ -63,7 +64,7 @@ export type ResumeSearchOptions = {
   clock?: () => Date;
 };
 
-type Assignment = { workstreamId: string; name: string };
+type Assignment = { workstreamId: string; name: string; aliasMatch?: string };
 
 /** Finds deterministic, evidence-excerpt-free targets from indexed local data. */
 export function findResumableTargets(
@@ -149,6 +150,7 @@ function runTarget(
       kind: "run",
       title: match.title ?? match.externalId,
       score: match.score,
+      confidence: match.confidence,
       match,
       signals,
       relatedRuns: [relatedRun(match)],
@@ -180,30 +182,67 @@ function workstreamTarget(
         b.run.updatedAt.localeCompare(a.run.updatedAt),
     )[0];
   if (!best) return emptyWorkstream(assignment);
+  const assignmentNameTerms = new Set(queryTerms(assignment.name));
   const nameTerms = queryTerms(query).filter((term) =>
-    assignment.name.toLocaleLowerCase().includes(term),
+    assignmentNameTerms.has(term),
   );
-  const nameScore = nameTerms.length / queryTerms(query).length;
+  const terms = queryTerms(query);
+  const nameCoverage = nameTerms.length / terms.length;
+  const exactName =
+    normalizedPhrase(assignment.name) === normalizedPhrase(query);
+  const namePhrase =
+    terms.length > 1 &&
+    normalizedPhrase(assignment.name).includes(normalizedPhrase(query));
+  const nameScore = assignment.aliasMatch
+    ? 0.97
+    : exactName
+      ? 0.99
+      : namePhrase
+        ? 0.93
+        : terms.length > 1 && nameCoverage === 1
+          ? 0.88
+          : nameCoverage > 0
+            ? terms.length === 1
+              ? 0.72
+              : 0.6 + nameCoverage * 0.18
+            : 0;
+  const nameConfidence: ResumableTarget["confidence"] =
+    assignment.aliasMatch ||
+    exactName ||
+    namePhrase ||
+    (terms.length > 1 && nameCoverage === 1)
+      ? "high"
+      : nameCoverage > 0
+        ? "medium"
+        : "low";
   const match =
-    best.result ??
-    toSearchResult(best.run, Math.min(0.99, 0.55 + nameScore * 0.4));
-  const signals: ResumeSignal[] = nameTerms.map((term) => ({
-    type: "workstream-name-match",
-    label: `Workstream name matched “${term}”`,
-    weight: 0.2,
-    sourceIds: runs.map((run) => run.externalId).sort(),
-  }));
+    best.result ?? toSearchResult(best.run, nameScore, nameConfidence);
+  const sourceIds = runs.map((run) => run.externalId).sort();
+  const signals: ResumeSignal[] = [];
+  if (assignment.aliasMatch) {
+    signals.push({
+      type: "alias-match",
+      label: `Alias matched “${assignment.aliasMatch}”`,
+      weight: 0.35,
+      sourceIds,
+    });
+  } else if (nameTerms.length > 0) {
+    signals.push({
+      type: exactName ? "exact-entity-match" : "entity-match",
+      label: `${exactName ? "Exact workstream" : "Workstream"} matched “${query}”`,
+      weight: exactName ? 0.35 : 0.25,
+      sourceIds,
+    });
+  }
   signals.push({
     type: "manual-assignment",
     label: "Manually assigned to canonical workstream",
     weight: 0.1,
-    sourceIds: runs.map((run) => run.externalId).sort(),
+    sourceIds,
   });
   if (best.result) signals.push(...matchSignals(match, query));
-  const score = Math.min(
-    0.99,
-    Math.max(match.score, 0.55 + nameScore * 0.35) + 0.04,
-  );
+  const score = Math.min(0.99, Math.max(match.score, nameScore) + 0.02);
+  const confidence = strongerConfidence(match.confidence, nameConfidence);
   return targetBase(
     database,
     {
@@ -211,6 +250,7 @@ function workstreamTarget(
       title: assignment.name,
       subtitle: `${runs.length} assigned run${runs.length === 1 ? "" : "s"}`,
       score: Number(score.toFixed(3)),
+      confidence,
       match,
       signals,
       relatedRuns: runs.map((run) => ({
@@ -234,6 +274,7 @@ function targetBase(
     title: string;
     subtitle?: string;
     score: number;
+    confidence: ResumableTarget["confidence"];
     match: SearchResult;
     signals: ResumeSignal[];
     relatedRuns: RelatedRun[];
@@ -257,7 +298,8 @@ function targetBase(
       : {}),
     lastActivity: input.match.lastActivity,
     sourceTool: input.match.sourceTool,
-    confidence: score >= 0.8 ? "high" : score >= 0.6 ? "medium" : "low",
+    ...(input.match.archived ? { archived: true } : {}),
+    confidence: input.confidence,
     score,
     scoreVersion: RESUME_SCORE_VERSION,
     signals: input.signals,
@@ -295,32 +337,87 @@ function targetBase(
 
 function matchSignals(match: SearchResult, query: string): ResumeSignal[] {
   const signals: ResumeSignal[] = [];
-  for (const term of queryTerms(query)) {
-    if ((match.title ?? "").toLocaleLowerCase().includes(term))
-      signals.push({
-        type: "title-match",
-        label: `Title matched “${term}”`,
-        weight: 0.2,
-        sourceIds: [match.externalId],
-      });
-    else if (
-      match.fileReferences.some((file) =>
-        file.toLocaleLowerCase().includes(term),
-      )
-    )
-      signals.push({
-        type: "file-match",
-        label: `Related file matched “${term}”`,
-        weight: 0.15,
-        sourceIds: [match.externalId],
-      });
-    else
-      signals.push({
-        type: "content-match",
-        label: `Indexed content matched “${term}”`,
-        weight: 0.1,
-        sourceIds: [match.externalId],
-      });
+  const details = match.matchDetails;
+  const sourceIds = [match.externalId];
+  if (match.aliasMatch) {
+    signals.push({
+      type: "alias-match",
+      label: `Alias matched “${match.aliasMatch}”`,
+      weight: 0.35,
+      sourceIds,
+    });
+  }
+  if (details.exactTitle) {
+    signals.push({
+      type: "exact-title-match",
+      label: `Exact title matched “${query}”`,
+      weight: 0.4,
+      sourceIds,
+    });
+  } else if (details.titlePrefix) {
+    signals.push({
+      type: "title-prefix-match",
+      label: `Title prefix matched “${query}”`,
+      weight: 0.35,
+      sourceIds,
+    });
+  } else if (details.titlePhrase) {
+    signals.push({
+      type: "title-phrase-match",
+      label: `Title phrase matched “${query}”`,
+      weight: 0.35,
+      sourceIds,
+    });
+  } else if (details.titleTerms.length > 0) {
+    signals.push({
+      type: "title-token-match",
+      label: `Title matched ${quotedTerms(details.titleTerms)}`,
+      weight: 0.25,
+      sourceIds,
+    });
+  }
+  if (details.projectExact || details.projectTerms.length > 0) {
+    signals.push({
+      type: details.projectExact ? "exact-project-match" : "project-path-match",
+      label: `Project path matched ${quotedTerms(
+        details.projectExact ? queryTerms(query) : details.projectTerms,
+      )}`,
+      weight: details.projectExact ? 0.35 : 0.22,
+      sourceIds,
+    });
+  }
+  if (details.meaningfulFileTerms.length > 0) {
+    signals.push({
+      type: "meaningful-path-match",
+      label: `Related path matched ${quotedTerms(details.meaningfulFileTerms)}`,
+      weight: 0.18,
+      sourceIds,
+    });
+  }
+  if (details.genericFileTerms.length > 0) {
+    signals.push({
+      type: "generic-file-match",
+      label: `Generic file match for ${quotedTerms(details.genericFileTerms)} (downweighted)`,
+      weight: 0.05,
+      sourceIds,
+    });
+  }
+  const contextualTerms = new Set([
+    ...details.titleTerms,
+    ...details.projectTerms,
+    ...details.meaningfulFileTerms,
+    ...details.genericFileTerms,
+  ]);
+  const contentOnlyTerms = details.contentTerms.filter(
+    (term) => !contextualTerms.has(term),
+  );
+  if (contentOnlyTerms.length > 0) {
+    signals.push({
+      type: "content-only-match",
+      label: `${queryTerms(query).length === 1 ? "Weak " : ""}content-only match for ${quotedTerms(contentOnlyTerms)}`,
+      weight: queryTerms(query).length === 1 ? 0.05 : 0.1,
+      sourceIds,
+    });
   }
   signals.push({
     type: "recent-activity",
@@ -328,6 +425,14 @@ function matchSignals(match: SearchResult, query: string): ResumeSignal[] {
     weight: 0,
     sourceIds: [match.externalId],
   });
+  if (match.archived) {
+    signals.push({
+      type: "archived-penalty",
+      label: "Archived result ranked lower",
+      weight: -0.1,
+      sourceIds,
+    });
+  }
   return signals;
 }
 
@@ -377,7 +482,7 @@ function matchingWorkstreams(
   return (
     database.raw
       .prepare(
-        `SELECT DISTINCT w.public_id, w.name, group_concat(a.alias, ' ') AS aliases FROM workstreams w LEFT JOIN workstream_aliases a ON a.workstream_id = w.id WHERE w.status = 'active' GROUP BY w.id`,
+        `SELECT DISTINCT w.public_id, w.name, group_concat(a.alias, char(10)) AS aliases FROM workstreams w LEFT JOIN workstream_aliases a ON a.workstream_id = w.id WHERE w.status = 'active' GROUP BY w.id`,
       )
       .all() as Array<{
       public_id: string;
@@ -385,12 +490,20 @@ function matchingWorkstreams(
       aliases: string | null;
     }>
   )
-    .filter((row) =>
-      terms.some((term) =>
-        `${row.name} ${row.aliases ?? ""}`.toLocaleLowerCase().includes(term),
-      ),
-    )
-    .map((row) => ({ workstreamId: row.public_id, name: row.name }));
+    .map((row) => {
+      const aliasMatch = (row.aliases?.split("\n") ?? []).find((alias) =>
+        aliasMatchesQuery(alias, query),
+      );
+      const nameTerms = new Set(queryTerms(row.name));
+      const nameMatched = terms.some((term) => nameTerms.has(term));
+      if (!nameMatched && !aliasMatch) return undefined;
+      return {
+        workstreamId: row.public_id,
+        name: row.name,
+        ...(aliasMatch ? { aliasMatch } : {}),
+      };
+    })
+    .filter((assignment): assignment is Assignment => assignment !== undefined);
 }
 
 type RunRow = {
@@ -432,7 +545,11 @@ function loadWorkstreamRuns(database: WorktrailDatabase, id: string): RunRow[] {
     ).map((item) => item.path),
   }));
 }
-function toSearchResult(run: RunRow, score: number): SearchResult {
+function toSearchResult(
+  run: RunRow,
+  score: number,
+  confidence: SearchResult["confidence"],
+): SearchResult {
   return {
     externalId: run.externalId,
     resumeRef: run.resumeRef,
@@ -441,9 +558,21 @@ function toSearchResult(run: RunRow, score: number): SearchResult {
     archived: run.archived,
     lastActivity: run.updatedAt,
     score,
-    confidence: score >= 0.8 ? "high" : "medium",
+    confidence,
     evidence: [],
     fileReferences: run.fileReferences,
+    matchDetails: {
+      exactTitle: false,
+      titlePhrase: false,
+      titlePrefix: false,
+      titleTerms: [],
+      projectExact: false,
+      projectTerms: [],
+      meaningfulFileTerms: [],
+      genericFileTerms: [],
+      contentTerms: [],
+      matchedTerms: [],
+    },
   };
 }
 function relatedRun(match: SearchResult): RelatedRun {
@@ -461,11 +590,36 @@ function emptyWorkstream(assignment: Assignment): ResumableTarget {
     lastActivity: "",
     confidence: "low",
     score: 0,
-    scoreVersion: 1,
+    scoreVersion: RESUME_SCORE_VERSION,
     signals: [],
     relatedFiles: [],
     relatedRuns: [],
     openActions: [],
     evidenceAvailable: false,
   };
+}
+
+function normalizedPhrase(value: string): string {
+  return queryTerms(value).join(" ");
+}
+
+function quotedTerms(terms: string[]): string {
+  return `“${terms.join(" ")}”`;
+}
+
+function strongerConfidence(
+  left: ResumableTarget["confidence"],
+  right: ResumableTarget["confidence"],
+): ResumableTarget["confidence"] {
+  const rank = { low: 0, medium: 1, high: 2 } as const;
+  return rank[left] >= rank[right] ? left : right;
+}
+
+function aliasMatchesQuery(alias: string, query: string): boolean {
+  if (normalizedPhrase(alias) === normalizedPhrase(query)) return true;
+  const querySet = new Set(queryTerms(query));
+  const aliasTerms = queryTerms(alias);
+  return (
+    aliasTerms.length > 0 && aliasTerms.every((term) => querySet.has(term))
+  );
 }

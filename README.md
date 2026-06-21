@@ -25,6 +25,11 @@ worktrail resume "safe apply GUI" --limit 5 --db PATH
 search and `report` provides time-bounded orientation. Fast Resume returns
 explainable signals and inert, copyable command data but never executes Codex.
 Its JSON omits transcript excerpts, diffs, raw home paths, and credentials.
+Ranking is deterministic and field-aware: strong title/project/workstream/alias
+evidence outranks meaningful paths, generic files, and content-only matches.
+Archived Codex threads are hidden by default; `--include-archived` includes
+penalized targets with additive `archived: true` display metadata. Ignored
+Worktrail runs remain excluded.
 Use `pnpm worktrail ...` for the equivalent source-development workflow.
 
 For a keyboard-first private launcher, the repository also includes a thin
@@ -421,8 +426,8 @@ Tests use only synthetic fixtures under `fixtures/codex/`.
 - File references outside structured patch events are regex detections and can
   have false positives or miss extensionless files.
 - `cwd` is a launch directory, not a guaranteed repository root.
-- Search is lexical SQLite FTS with simple term coverage scoring. It does not
-  perform semantic retrieval or full workstream state synthesis.
+- Search is lexical SQLite FTS with deterministic field-aware scoring. It does
+  not perform semantic retrieval or full workstream state synthesis.
 - Deterministic workstream candidates are intentionally conservative and may
   leave related threads separate. Manual assignment is the correction path.
 - Candidate grouping is calculated at query time and is not a durable claim.

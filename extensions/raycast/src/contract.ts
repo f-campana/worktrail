@@ -62,6 +62,7 @@ function parseTarget(input: unknown, path: string): ResumableTarget {
       : { command: parseCommand(value.command, `${path}.command`) }),
     lastActivity: string(value.lastActivity, `${path}.lastActivity`),
     ...optionalStringField(value, "sourceTool", path),
+    ...optionalBooleanField(value, "archived", path),
     confidence: oneOf(
       value.confidence,
       ["high", "medium", "low"] as const,
@@ -70,7 +71,7 @@ function parseTarget(input: unknown, path: string): ResumableTarget {
     score: finiteNumber(value.score, `${path}.score`),
     scoreVersion: oneOf(
       value.scoreVersion,
-      [1] as const,
+      [1, 2] as const,
       `${path}.scoreVersion`,
     ),
     signals: array(value.signals, `${path}.signals`).map((signal, index) =>
@@ -191,6 +192,16 @@ function optionalStringField(
   return value[name] === undefined
     ? {}
     : { [name]: string(value[name], `${path}.${name}`) };
+}
+
+function optionalBooleanField(
+  value: Record<string, unknown>,
+  name: string,
+  path: string,
+): Record<string, boolean> {
+  return value[name] === undefined
+    ? {}
+    : { [name]: boolean(value[name], `${path}.${name}`) };
 }
 
 function oneOf<const T extends readonly (string | number)[]>(
