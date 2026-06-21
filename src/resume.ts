@@ -34,7 +34,7 @@ export type ResumableTarget = {
   relatedFiles: string[];
   relatedRuns: RelatedRun[];
   openActions: Array<{
-    kind: "copy-command" | "copy-id";
+    kind: "open-codex" | "copy-command" | "copy-id";
     label: string;
     value: string;
   }>;
@@ -265,6 +265,11 @@ function targetBase(
     relatedRuns: input.relatedRuns,
     openActions: command
       ? [
+          {
+            kind: "open-codex",
+            label: "Open in Codex",
+            value: `codex://threads/${input.match.resumeRef}`,
+          },
           {
             kind: "copy-command",
             label: "Copy Codex resume command",

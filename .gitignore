@@ -7,4 +7,5 @@ coverage/
 test-results/
 playwright-report/
 ui/dist/
+dist/
 .DS_Store

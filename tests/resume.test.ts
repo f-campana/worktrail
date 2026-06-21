@@ -67,6 +67,18 @@ test("resume ranks runs and canonical workstreams without leaking evidence", asy
       "resume",
       unassigned,
     ]);
+    assert.deepEqual(runResult.targets[0]?.openActions, [
+      {
+        kind: "open-codex",
+        label: "Open in Codex",
+        value: `codex://threads/${unassigned}`,
+      },
+      {
+        kind: "copy-command",
+        label: "Copy Codex resume command",
+        value: `codex resume ${unassigned}`,
+      },
+    ]);
     assert.ok(runResult.targets[0]?.relatedFiles.includes("src/report.ts"));
     assert.ok(
       runResult.targets[0]?.signals.some(
@@ -177,6 +189,10 @@ test("resume accepts UUIDv7 references without allowing unsafe commands", async 
       program: "codex",
       args: ["resume", uuidV7],
     });
+    assert.equal(
+      current.targets[0]?.openActions[0]?.value,
+      `codex://threads/${uuidV7}`,
+    );
     assert.equal(current.diagnostics.length, 0);
 
     const unsafe = findResumableTargets(database, {

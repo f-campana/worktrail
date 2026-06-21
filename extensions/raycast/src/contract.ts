@@ -17,6 +17,13 @@ export class ResumeCompatibilityError extends Error {
   }
 }
 
+export class ResumeSchemaError extends Error {
+  constructor(path: string, expectation: string) {
+    super(`Invalid Worktrail resume response: ${path} ${expectation}.`);
+    this.name = "ResumeSchemaError";
+  }
+}
+
 export function parseResumeSearchResult(input: unknown): ResumeSearchResult {
   const value = record(input, "response");
   if (value.schemaVersion !== SUPPORTED_SCHEMA_VERSION) {
@@ -124,7 +131,7 @@ function parseOpenAction(input: unknown, path: string): ResumeOpenAction {
   return {
     kind: oneOf(
       value.kind,
-      ["copy-command", "copy-id"] as const,
+      ["open-codex", "copy-command", "copy-id"] as const,
       `${path}.kind`,
     ),
     label: string(value.label, `${path}.label`),
@@ -198,7 +205,5 @@ function oneOf<const T extends readonly (string | number)[]>(
 }
 
 function invalid(path: string, expectation: string): Error {
-  return new Error(
-    `Invalid Worktrail resume response: ${path} ${expectation}.`,
-  );
+  return new ResumeSchemaError(path, expectation);
 }

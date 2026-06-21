@@ -15,7 +15,7 @@ export type RelatedRun = {
 };
 
 export type ResumeOpenAction = {
-  kind: "copy-command" | "copy-id";
+  kind: "open-codex" | "copy-command" | "copy-id";
   label: string;
   value: string;
 };
@@ -55,8 +55,9 @@ export type ResumeSearchResult = {
 };
 
 export type WorktrailPreferences = {
+  worktrailPath?: string;
   pnpmPath?: string;
-  worktrailProjectPath: string;
+  worktrailProjectPath?: string;
   databasePath?: string;
   resultLimit: string;
   includeArchived: boolean;

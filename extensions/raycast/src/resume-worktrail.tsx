@@ -5,11 +5,16 @@ import {
   getPreferenceValues,
   Icon,
   List,
+  type LaunchProps,
   openCommandPreferences,
 } from "@raycast/api";
 import { useEffect, useState } from "react";
 
-import { sanitizeErrorMessage, searchWorktrail } from "./client.js";
+import {
+  debugCommandFromError,
+  sanitizeErrorMessage,
+  searchWorktrail,
+} from "./client.js";
 import {
   deriveTargetDisplay,
   diagnosticMessages,
@@ -29,9 +34,13 @@ type ViewState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "success"; result: ResumeSearchResult }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; debugCommand?: string };
 
-export default function ResumeWorktrail() {
+type ResumeWorktrailArguments = { query?: string };
+
+export default function ResumeWorktrail(
+  props: LaunchProps<{ arguments: ResumeWorktrailArguments }>,
+) {
   const preferences = getPreferenceValues<WorktrailPreferences>();
   const {
     databasePath,
@@ -39,8 +48,9 @@ export default function ResumeWorktrail() {
     pnpmPath,
     resultLimit,
     worktrailProjectPath,
+    worktrailPath,
   } = preferences;
-  const [searchText, setSearchText] = useState("");
+  const [searchText, setSearchText] = useState(props.arguments.query ?? "");
   const [state, setState] = useState<ViewState>({ status: "idle" });
   const query = searchText.trim();
 
@@ -61,6 +71,7 @@ export default function ResumeWorktrail() {
           pnpmPath,
           resultLimit,
           worktrailProjectPath,
+          worktrailPath,
         },
         controller.signal,
       )
@@ -70,12 +81,15 @@ export default function ResumeWorktrail() {
         })
         .catch((error: unknown) => {
           if (controller.signal.aborted) return;
+          const debugCommand = debugCommandFromError(error);
           setState({
             status: "error",
             message: sanitizeErrorMessage(error, [
-              worktrailProjectPath,
+              worktrailPath ?? "",
+              worktrailProjectPath ?? "",
               databasePath ?? "",
             ]),
+            ...(debugCommand ? { debugCommand } : {}),
           });
         });
     }, SEARCH_DEBOUNCE_MS);
@@ -91,6 +105,7 @@ export default function ResumeWorktrail() {
     query,
     resultLimit,
     worktrailProjectPath,
+    worktrailPath,
   ]);
 
   const result = state.status === "success" ? state.result : undefined;
@@ -137,6 +152,13 @@ function EmptyState({ query, state }: { query: string; state: ViewState }) {
       <List.EmptyView
         actions={
           <ActionPanel>
+            {state.debugCommand ? (
+              <Action.CopyToClipboard
+                content={state.debugCommand}
+                icon={Icon.Terminal}
+                title="Copy Debug Command"
+              />
+            ) : null}
             <Action
               icon={Icon.Gear}
               onAction={openCommandPreferences}
@@ -213,23 +235,25 @@ function TargetItem({
             ]
           : []),
         {
-          icon: display.resumable ? Icon.Clipboard : Icon.XMarkCircle,
-          tooltip: display.resumable
-            ? "Resume command available"
-            : "No resume command available",
+          icon: display.opensInCodex
+            ? Icon.AppWindow
+            : display.resumable
+              ? Icon.Clipboard
+              : Icon.XMarkCircle,
+          tooltip: display.opensInCodex
+            ? "Exact Codex thread can be opened"
+            : display.resumable
+              ? "Resume command available"
+              : "No resume command available",
         },
       ]}
       actions={
         <ActionPanel>
           <ActionPanel.Section title="Declared Worktrail Actions">
             {actions.map((action, index) => (
-              <Action.CopyToClipboard
+              <DeclaredAction
                 key={`${action.kind}:${action.value}:${index}`}
-                content={action.value}
-                icon={
-                  action.kind === "copy-command" ? Icon.Terminal : Icon.Hashtag
-                }
-                title={sanitizeDisplayText(action.label)}
+                action={action}
               />
             ))}
           </ActionPanel.Section>
@@ -259,6 +283,29 @@ function TargetItem({
       icon={target.kind === "run" ? Icon.Terminal : Icon.Folder}
       subtitle={display.subtitle}
       title={displayTitle}
+    />
+  );
+}
+
+function DeclaredAction({
+  action,
+}: {
+  action: ResumableTarget["openActions"][number];
+}) {
+  if (action.kind === "open-codex") {
+    return (
+      <Action.Open
+        icon={Icon.AppWindow}
+        target={action.value}
+        title={sanitizeDisplayText(action.label)}
+      />
+    );
+  }
+  return (
+    <Action.CopyToClipboard
+      content={action.value}
+      icon={action.kind === "copy-command" ? Icon.Terminal : Icon.Hashtag}
+      title={sanitizeDisplayText(action.label)}
     />
   );
 }

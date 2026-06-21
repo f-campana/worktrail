@@ -13,6 +13,7 @@ export type TargetDisplay = {
   subtitle: string;
   relatedFiles: string[];
   resumable: boolean;
+  opensInCodex: boolean;
 };
 
 export function deriveTargetDisplay(target: ResumableTarget): TargetDisplay {
@@ -34,7 +35,21 @@ export function deriveTargetDisplay(target: ResumableTarget): TargetDisplay {
       .filter((file) => file.length > 0)
       .slice(0, 8),
     resumable: selectCopyCommand(target) !== undefined,
+    opensInCodex: selectCodexOpenAction(target) !== undefined,
   };
+}
+
+export function selectCodexOpenAction(
+  target: ResumableTarget,
+): ResumeOpenAction | undefined {
+  return target.openActions.find(
+    (action) =>
+      action.kind === "open-codex" &&
+      action.value === `codex://threads/${target.resumeRef}` &&
+      /^codex:\/\/threads\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        action.value,
+      ),
+  );
 }
 
 export function selectCopyCommand(
@@ -53,10 +68,13 @@ export function selectCopyCommand(
 }
 
 export function targetActions(target: ResumableTarget): ResumeOpenAction[] {
+  const codexOpen = selectCodexOpenAction(target);
   const command = selectCopyCommand(target);
   const actions = [
-    ...(command ? [command] : []),
-    ...target.openActions.filter((action) => action !== command),
+    ...target.openActions.filter(
+      (action) => action.kind !== "open-codex" || action === codexOpen,
+    ),
+    ...(command && !target.openActions.includes(command) ? [command] : []),
   ];
   const seen = new Set<string>();
   return actions.filter((action) => {

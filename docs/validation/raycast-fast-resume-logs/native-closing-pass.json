@@ -1,0 +1,193 @@
+{
+  "capturedAt": "2026-06-21T00:33:48+02:00",
+  "completedAt": "2026-06-21T00:43:20+02:00",
+  "environment": {
+    "platform": "macOS 26.2 arm64",
+    "node": "25.8.1",
+    "pnpm": "10.28.2",
+    "raycastApi": "1.104.19",
+    "homePresent": true,
+    "homedirMatchesEnvironment": true
+  },
+  "preferences": {
+    "pnpmExecutable": "/opt/homebrew/bin/pnpm",
+    "worktrailProject": "~/Documents/worktrail",
+    "databaseModes": ["default", "~/.worktrail/worktrail.db"],
+    "limit": 5,
+    "includeArchived": false
+  },
+  "nativeFailureBeforePathFix": {
+    "query": "profile",
+    "exitCode": 254,
+    "stdoutCaptured": false,
+    "stderrCaptured": false,
+    "debugActionVisible": true,
+    "rootCauseReproduced": "A reduced child PATH containing only /opt/homebrew/bin produced the same exit code and empty output. Directly probing the repository-local tsx launcher showed that sed, dirname, and uname were unavailable. pnpm maps the nested ENOENT errno -2 to process status 254 while --silent suppresses its reporter.",
+    "fix": "Guarantee standard macOS executable directories in the child PATH."
+  },
+  "processChecks": {
+    "reducedPathBeforeFix": {
+      "exitCode": 254,
+      "stdoutBytes": 0,
+      "stderrBytes": 0
+    },
+    "reducedPathAfterFix": {
+      "exitCode": 0,
+      "stdoutValidJson": true,
+      "resultCount": 5,
+      "stderrBytes": 0,
+      "pathHasUsrBin": true,
+      "pathHasBin": true
+    },
+    "normalTerminalCommand": {
+      "exitCode": 0,
+      "stdoutValidJson": true,
+      "stdoutStartsWithJson": true,
+      "resultCount": 5,
+      "stderrBytes": 0,
+      "sqliteExperimentalWarningObserved": false
+    }
+  },
+  "clientChecks": [
+    {
+      "database": "default",
+      "query": "profile",
+      "resultCount": 5,
+      "topTitle": "Plan | fabien-campana.dev launch",
+      "topKind": "run",
+      "topConfidence": "high",
+      "copyActionAvailable": true,
+      "copyValueMatchesDeclaredResumeCommand": true,
+      "diagnosticCount": 0
+    },
+    {
+      "database": "default",
+      "query": "github profile",
+      "resultCount": 5,
+      "topTitle": "Plan | fabien-campana.dev launch",
+      "topKind": "run",
+      "topConfidence": "high",
+      "copyActionAvailable": true,
+      "copyValueMatchesDeclaredResumeCommand": true,
+      "diagnosticCount": 0
+    },
+    {
+      "database": "default",
+      "query": "fast resume",
+      "resultCount": 5,
+      "topTitle": "Validate resume usefulness",
+      "topKind": "run",
+      "topConfidence": "high",
+      "copyActionAvailable": true,
+      "copyValueMatchesDeclaredResumeCommand": true,
+      "diagnosticCount": 0
+    },
+    {
+      "database": "default",
+      "query": "zzzznonexistenttoken987654",
+      "resultCount": 0,
+      "diagnosticCount": 0
+    },
+    {
+      "database": "explicit",
+      "querySet": [
+        "profile",
+        "github profile",
+        "fast resume",
+        "zzzznonexistenttoken987654"
+      ],
+      "identicalToDefaultDatabaseResults": true,
+      "diagnosticCount": 0
+    }
+  ],
+  "nativeClosingState": {
+    "extensionImported": true,
+    "extensionCompiled": true,
+    "commandRegistered": true,
+    "postFixResultRendering": {
+      "confirmed": true,
+      "query": "profile",
+      "resultCount": 5,
+      "detailVisible": true,
+      "confidenceVisible": true,
+      "signalsVisible": true,
+      "copyCodexResumeCommandVisible": true
+    },
+    "clipboardPasteVerification": {
+      "confirmed": true,
+      "declaredActionPresent": true,
+      "exactMatch": true,
+      "looksLikeInertCodexResume": true,
+      "commandValueStored": false
+    },
+    "codexExecuted": false,
+    "screenshotsRetained": false,
+    "screenshotPolicy": "The supplied cropped failure and success screenshots were reviewed but not copied into the repository because they contain a command UUID or unrelated desktop content. Temporary full-screen captures were deleted."
+  },
+  "installedExecutableNativeClosingPass": {
+    "completedAt": "2026-06-21",
+    "executable": "~/.local/bin/worktrail",
+    "database": "default",
+    "schemaVersion": 1,
+    "stderrEmpty": true,
+    "raycastArgument": "What you remember",
+    "alias": "resume",
+    "aliasArgumentModeConfirmed": true,
+    "uninterruptedRootPhraseReliable": false,
+    "hotkeyRecommended": true,
+    "queries": [
+      {
+        "query": "profile",
+        "state": "results",
+        "resultCount": 5,
+        "topTitle": "Plan | fabien-campana.dev launch",
+        "topConfidence": "high",
+        "primaryAction": "open-codex"
+      },
+      {
+        "query": "github profile",
+        "state": "results",
+        "resultCount": 5,
+        "topTitle": "Plan | fabien-campana.dev launch",
+        "topConfidence": "high",
+        "primaryAction": "open-codex"
+      },
+      {
+        "query": "fast resume",
+        "state": "results",
+        "resultCount": 5,
+        "topTitle": "Validate resume usefulness",
+        "topConfidence": "high",
+        "primaryAction": "open-codex"
+      },
+      {
+        "query": "worktrail",
+        "state": "results",
+        "resultCount": 5,
+        "topTitle": "Validate resume usefulness",
+        "topConfidence": "high",
+        "primaryAction": "open-codex"
+      },
+      {
+        "query": "shipready",
+        "state": "empty",
+        "resultCount": 0
+      },
+      {
+        "query": "zzzznonexistenttoken987654",
+        "state": "empty",
+        "resultCount": 0
+      }
+    ],
+    "copyActionVisible": true,
+    "copyValuesMatchDeclaredResumeCommands": true,
+    "directOpen": {
+      "supported": true,
+      "mechanism": "codex://threads/<session-uuid>",
+      "exactSelectedThreadOpened": true,
+      "startedAgentWork": false
+    },
+    "readyToMerge": true,
+    "recommendedNextTask": "Focused ranking evaluation for broad versus intent-qualified queries."
+  }
+}
