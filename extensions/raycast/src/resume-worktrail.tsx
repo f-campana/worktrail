@@ -16,9 +16,9 @@ import {
   searchWorktrail,
 } from "./client.js";
 import {
+  buildTargetDetailMarkdown,
   deriveTargetDisplay,
   diagnosticMessages,
-  escapeMarkdown,
   sanitizeDisplayText,
   targetActions,
 } from "./display.js";
@@ -52,6 +52,7 @@ export default function ResumeWorktrail(
   } = preferences;
   const [searchText, setSearchText] = useState(props.arguments.query ?? "");
   const [state, setState] = useState<ViewState>({ status: "idle" });
+  const [isShowingDetail, setIsShowingDetail] = useState(false);
   const query = searchText.trim();
 
   useEffect(() => {
@@ -116,7 +117,7 @@ export default function ResumeWorktrail(
     <List
       filtering={false}
       isLoading={state.status === "loading"}
-      isShowingDetail={targets.length > 0}
+      isShowingDetail={isShowingDetail && targets.length > 0}
       navigationTitle="Resume Worktrail"
       onSearchTextChange={setSearchText}
       searchBarPlaceholder="Type what you remember"
@@ -135,6 +136,8 @@ export default function ResumeWorktrail(
             <TargetItem
               key={`${target.kind}:${target.title}:${target.lastActivity}:${index}`}
               diagnostics={diagnostics}
+              isShowingDetail={isShowingDetail}
+              onToggleDetail={() => setIsShowingDetail((visible) => !visible)}
               target={target}
             />
           ))}
@@ -201,9 +204,13 @@ function EmptyState({ query, state }: { query: string; state: ViewState }) {
 
 function TargetItem({
   diagnostics,
+  isShowingDetail,
+  onToggleDetail,
   target,
 }: {
   diagnostics: string[];
+  isShowingDetail: boolean;
+  onToggleDetail: () => void;
   target: ResumableTarget;
 }) {
   const display = deriveTargetDisplay(target);
@@ -212,40 +219,19 @@ function TargetItem({
   return (
     <List.Item
       accessories={[
-        ...(target.sourceTool
-          ? [{ text: sanitizeDisplayText(target.sourceTool) }]
-          : []),
-        {
+        ...display.accessoryLabels.map((label) => ({
           tag: {
-            value: target.confidence,
+            value: label,
             color:
-              target.confidence === "high"
-                ? Color.Green
-                : target.confidence === "medium"
-                  ? Color.Orange
-                  : Color.SecondaryText,
+              label === "Archived"
+                ? Color.SecondaryText
+                : target.confidence === "high"
+                  ? Color.Green
+                  : target.confidence === "medium"
+                    ? Color.Orange
+                    : Color.SecondaryText,
           },
-        },
-        ...(target.relatedFiles.length > 0
-          ? [
-              {
-                text: `${target.relatedFiles.length} file${target.relatedFiles.length === 1 ? "" : "s"}`,
-                icon: Icon.Document,
-              },
-            ]
-          : []),
-        {
-          icon: display.opensInCodex
-            ? Icon.AppWindow
-            : display.resumable
-              ? Icon.Clipboard
-              : Icon.XMarkCircle,
-          tooltip: display.opensInCodex
-            ? "Exact Codex thread can be opened"
-            : display.resumable
-              ? "Resume command available"
-              : "No resume command available",
-        },
+        })),
       ]}
       actions={
         <ActionPanel>
@@ -258,6 +244,12 @@ function TargetItem({
             ))}
           </ActionPanel.Section>
           <ActionPanel.Section title="Target">
+            <Action
+              icon={Icon.Eye}
+              onAction={onToggleDetail}
+              shortcut={{ modifiers: ["cmd"], key: "i" }}
+              title={isShowingDetail ? "Hide Details" : "Show Details"}
+            />
             {target.resumeRef ? (
               <Action.CopyToClipboard
                 content={target.resumeRef}
@@ -280,7 +272,6 @@ function TargetItem({
         </ActionPanel>
       }
       detail={<TargetDetail diagnostics={diagnostics} target={target} />}
-      icon={target.kind === "run" ? Icon.Terminal : Icon.Folder}
       subtitle={display.subtitle}
       title={displayTitle}
     />
@@ -318,60 +309,33 @@ function TargetDetail({
   target: ResumableTarget;
 }) {
   const display = deriveTargetDisplay(target);
-  const command = targetActions(target).find(
-    (action) => action.kind === "copy-command",
-  );
-  const signalLines = target.signals.length
-    ? target.signals
-        .slice(0, 8)
-        .map(
-          (signal) => `- ${escapeMarkdown(sanitizeDisplayText(signal.label))}`,
-        )
-        .join("\n")
-    : "- No signals supplied";
-  const fileLines = display.relatedFiles.length
-    ? display.relatedFiles
-        .map((file) => `- \`${file.replace(/`/g, "\\`")}\``)
-        .join("\n")
-    : "- No related files supplied";
-  const runLines = target.relatedRuns.length
-    ? target.relatedRuns
-        .slice(0, 8)
-        .map((run) => {
-          const title = sanitizeDisplayText(run.title ?? "Related run");
-          const activity = deriveTargetDisplay({
-            ...target,
-            lastActivity: run.lastActivity,
-          }).lastActivity;
-          return `- ${escapeMarkdown(title)} — ${escapeMarkdown(activity)}`;
-        })
-        .join("\n")
-    : "- No related runs supplied";
-  const diagnosticSection = diagnostics.length
-    ? `\n\n## Diagnostics\n\n${diagnostics.map((message) => `- ${escapeMarkdown(message)}`).join("\n")}`
-    : "";
-  const markdown = command
-    ? `## Resume command\n\n\`\`\`sh\n${command.value.replace(/`/g, "\\`")}\n\`\`\`\n\n## Why this matched\n\n${signalLines}\n\n## Related files\n\n${fileLines}\n\n## Related runs\n\n${runLines}${diagnosticSection}`
-    : `## Resume command\n\nUnavailable. Worktrail did not declare a copyable resume command for this target.\n\n## Why this matched\n\n${signalLines}\n\n## Related files\n\n${fileLines}\n\n## Related runs\n\n${runLines}${diagnosticSection}`;
+  const markdown = buildTargetDetailMarkdown(target, diagnostics);
 
   return (
     <List.Item.Detail
       markdown={markdown}
       metadata={
         <List.Item.Detail.Metadata>
-          <List.Item.Detail.Metadata.Label title="Kind" text={display.kind} />
           <List.Item.Detail.Metadata.Label
-            title="Confidence"
-            text={display.confidence}
+            title="Open in Codex"
+            text={display.opensInCodex ? "Available" : "Unavailable"}
           />
           <List.Item.Detail.Metadata.Label
             title="Last activity"
             text={display.lastActivity}
           />
-          {target.sourceTool ? (
+          <List.Item.Detail.Metadata.Label
+            title="Source"
+            text={display.source}
+          />
+          <List.Item.Detail.Metadata.Label
+            title="Confidence"
+            text={display.confidence}
+          />
+          {display.archived ? (
             <List.Item.Detail.Metadata.Label
-              title="Source tool"
-              text={sanitizeDisplayText(target.sourceTool)}
+              title="Archive state"
+              text="Archived"
             />
           ) : null}
           <List.Item.Detail.Metadata.Separator />
@@ -379,18 +343,12 @@ function TargetDetail({
             title="Score"
             text={`${target.score.toFixed(3)} (v${target.scoreVersion})`}
           />
-          <List.Item.Detail.Metadata.Label
-            title="Resume"
-            text={display.resumable ? "Command available" : "Unavailable"}
-          />
-          <List.Item.Detail.Metadata.Label
-            title="Related files"
-            text={String(target.relatedFiles.length)}
-          />
-          <List.Item.Detail.Metadata.Label
-            title="Related runs"
-            text={String(target.relatedRuns.length)}
-          />
+          {target.resumeRef ? (
+            <List.Item.Detail.Metadata.Label
+              title="Resume UUID"
+              text={target.resumeRef}
+            />
+          ) : null}
         </List.Item.Detail.Metadata>
       }
     />

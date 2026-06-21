@@ -411,3 +411,100 @@ intent-qualified queries, not more launcher or packaging work.
 - `ray lint` remains non-enforced for this private extension: Raycast's author
   lookup returns 404 for `fabiencampana`, and ESLint is not installed. Its
   Prettier phase passed independently through the enforced format check.
+
+## Daily-use ranking and presentation pass (2026-06-21)
+
+The focused source audit and before/after corpus are recorded in
+[`fast-resume-ranking-evals.md`](fast-resume-ranking-evals.md). The live index
+contains the user-expected `SC | Review PieChart component` target as an active
+thread with cwd `~/Documents/scaleway`; ranking, not missing metadata or archive
+filtering, caused the original failure.
+
+### Specific failure before and after
+
+| Query                | Before top result                 | Before                     | After top result      | After                      | Explanation after                |
+| -------------------- | --------------------------------- | -------------------------- | --------------------- | -------------------------- | -------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------ |
+| `scaleway`           | `Review backend positioning`      | 0.99 high                  | `SC                   | Review PieChart component` | 0.94 high                        | exact project path `scaleway`; recency only breaks ties among active project matches |
+| `SC`                 | `Inspect Roundtable domain model` | 0.99 high                  | `SC                   | Review PieChart component` | 0.95 high                        | delimited title prefix `SC`                                                          |
+| `review piechart`    | expected target                   | 0.99 high                  | expected target       | 0.93 high                  | title phrase                     |
+| `piechart component` | expected target                   | 0.99 high                  | expected target       | 0.93 high                  | title phrase                     |
+| `github profile`     | `Plan                             | fabien-campana.dev launch` | 0.99 high             | `Job                       | Audit GitHub profile`            | 0.93 high                                                                            | title phrase                               |
+| `profile`            | `Plan                             | fabien-campana.dev launch` | 0.99 high             | `Job                       | Audit GitHub profile`            | 0.72 medium                                                                          | title token; broad query remains ambiguous |
+| `fast resume`        | `Validate resume usefulness`      | 0.99 high                  | same target           | 0.73 medium                | title token plus meaningful path |
+| `raycast`            | `Validate resume usefulness`      | 0.99 high                  | same plausible target | 0.34 low                   | weak content-only match          |
+| `worktrail`          | `Validate resume usefulness`      | 0.99 high                  | `Master               | worktrail`                 | 0.96 high                        | title plus exact project path                                                        |
+| `shipready`          | no result                         | —                          | `Master               | ship-ready`                | 0.94 high                        | compact exact project-path identity                                                  |
+
+No archived state affects the expected Scaleway target: it is active. Two other
+`SC | … PieChart …` threads observed in the index are Codex-archived and remain
+hidden by default.
+
+### Archive and ignore semantics
+
+- Default resume search excludes `source_threads.archived=1` and all rows in
+  `ignored_threads`.
+- `--include-archived` and the Raycast preference include Codex-archived source
+  threads, apply a rank penalty, and expose additive `archived: true` target
+  metadata for an `Archived` row badge.
+- Ignored runs remain excluded even when archived results are included. There
+  is no debug-mode override in Fast Resume.
+- Worktrail has no separate per-run archive state. The archived flag is derived
+  from Codex `archived_sessions`; Worktrail ignore is a distinct local state.
+
+### Raycast UI before and after
+
+Before, the detail pane was always open, reducing title width and producing
+severe row truncation. Rows repeated source, full confidence text, file count,
+and an open/copy icon. Detail markdown led with the shell resume command and
+surfaced score/source/count metadata before decision context.
+
+After:
+
+- the full-width result list is the default; `Cmd-I` toggles detail on demand;
+- row subtitle is decision context such as
+  `Codex · 3w ago · project: scaleway`;
+- row accessories contain only `High`/`Med`/`Low` and optional `Archived`;
+- unlabeled open/copy icons, source accessory, and file-count accessory are
+  removed;
+- detail starts with the target title and Open in Codex availability, followed
+  by why it matched, activity/source, confidence explanation, related files,
+  resume-command fallback, and finally debug fields;
+- **Open in Codex** remains the first declared action and **Copy Codex resume
+  command** remains second. The extension opens a declared deep link and does
+  not execute Codex or a shell command.
+
+The in-app Browser cannot automate Raycast's native extension list because it
+is not a browser/localhost surface. Validation therefore used the installed CLI
+corpus, pure display/contract/action tests, Raycast TypeScript/build checks, and
+code inspection. Manual native verification steps are:
+
+1. Run `pnpm --dir extensions/raycast dev` and open **Resume Worktrail**.
+2. Query `scaleway`; verify the complete expected title is readable in the
+   full-width list with `Codex · … · project: scaleway` and a compact `High`
+   badge.
+3. Press `Cmd-I`; verify human-first detail ordering and press it again to
+   restore the full-width list.
+4. Open the action panel; verify **Open in Codex** is first and **Copy Codex
+   resume command** is second.
+5. Enable included archived results, query a known archived target, and verify
+   the `Archived` badge and `Archived result ranked lower` explanation.
+
+RAG, embeddings, LLM summarization, and graph UI remain deferred because the
+measured failures were resolved with available deterministic metadata and
+calibrated presentation.
+
+### Validation results
+
+- Required root command passed: `pnpm typecheck && pnpm test && pnpm ui:build`
+  with 50/50 tests.
+- Root format check and `git diff --check` passed.
+- Raycast typecheck, 39/39 helper tests, production build, and format check
+  passed.
+- Installed executable checks used `~/.local/bin/worktrail`; score version 2
+  was observed inside unchanged `ResumeSearchResult` schema version 1.
+- The Raycast client successfully parsed installed-executable results for
+  `scaleway`, `profile`, and `shipready`; each retained action order
+  `open-codex, copy-command`.
+- `ray lint` remains non-enforced for this private extension: Raycast's author
+  API returns 404 for `fabiencampana`, and ESLint is not installed. Its
+  independent Prettier check passed.

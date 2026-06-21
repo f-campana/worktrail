@@ -17,6 +17,7 @@ import {
   ResumeCompatibilityError,
 } from "../src/contract.js";
 import {
+  buildTargetDetailMarkdown,
   deriveTargetDisplay,
   selectCodexOpenAction,
   selectCopyCommand,
@@ -54,7 +55,12 @@ const target: ResumableTarget = {
   confidence: "high",
   score: 0.95,
   scoreVersion: 1,
-  signals: [{ type: "title-match", label: "Title matched fast" }],
+  signals: [
+    {
+      type: "title-phrase-match",
+      label: "Title phrase matched “fast resume”",
+    },
+  ],
   relatedFiles: ["src/resume.ts"],
   relatedRuns: [
     {
@@ -132,6 +138,12 @@ async function captureError(promise: Promise<unknown>): Promise<unknown> {
 
 test("parses a valid ResumeSearchResult v1", () => {
   assert.deepEqual(parseResumeSearchResult(response()), response());
+  assert.equal(
+    parseResumeSearchResult(
+      response({ targets: [{ ...target, scoreVersion: 2, archived: true }] }),
+    ).targets[0]?.archived,
+    true,
+  );
 });
 
 test("rejects an unsupported schema version", () => {
@@ -152,13 +164,51 @@ test("rejects an invalid target instead of guessing", () => {
 });
 
 test("derives compact display metadata", () => {
-  const display = deriveTargetDisplay(target);
+  const display = deriveTargetDisplay(
+    target,
+    new Date("2026-06-21T12:00:00.000Z"),
+  );
   assert.equal(display.kind, "Run");
   assert.equal(display.confidence, "High confidence");
-  assert.match(display.subtitle, /^High confidence · Run · /);
+  assert.equal(display.confidenceShort, "High");
+  assert.equal(display.subtitle, "Codex · yesterday · title: fast resume");
+  assert.deepEqual(display.accessoryLabels, ["High"]);
   assert.deepEqual(display.relatedFiles, ["src/resume.ts"]);
   assert.equal(display.resumable, true);
   assert.equal(display.opensInCodex, true);
+});
+
+test("shows only compact confidence and archive row badges", () => {
+  const display = deriveTargetDisplay(
+    { ...target, archived: true, confidence: "medium" },
+    new Date("2026-06-21T12:00:00.000Z"),
+  );
+  assert.deepEqual(display.accessoryLabels, ["Med", "Archived"]);
+  assert.doesNotMatch(
+    display.subtitle,
+    /confidence|related file|resume command/i,
+  );
+});
+
+test("builds human-first detail markdown with debug data last", () => {
+  const markdown = buildTargetDetailMarkdown(target);
+  assert.match(markdown, /^# Fast Resume/m);
+  assert.match(markdown, /\*\*Open in Codex:\*\* Available/);
+  assert.ok(
+    markdown.indexOf("## Why this matched") < markdown.indexOf("## Activity"),
+  );
+  assert.ok(
+    markdown.indexOf("## Activity") < markdown.indexOf("## Confidence"),
+  );
+  assert.ok(
+    markdown.indexOf("## Confidence") <
+      markdown.indexOf("## Resume command fallback"),
+  );
+  assert.ok(
+    markdown.indexOf("## Resume command fallback") <
+      markdown.indexOf("## Debug"),
+  );
+  assert.match(markdown, /Score: 0\.950 \(v1\)/);
 });
 
 test("selects only the declared exact-thread Codex action", () => {

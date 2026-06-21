@@ -100,9 +100,13 @@ query remains one process argument even when it contains shell-significant
 text.
 
 The command shows empty, loading, no-result, ranked-result, diagnostic, and
-sanitized-error states. Each result includes compact metadata, signals, related
-files/runs, and every copy action declared in `openActions`. A target without a
-declared or contract-provided resume command is clearly marked unavailable.
+sanitized-error states. The result list is full width by default so titles stay
+readable. Each row shows a compact source/activity/match subtitle, a short
+confidence badge, and an `Archived` badge only when applicable. Press `Cmd-I`
+to toggle the human-first detail pane with the match explanation, activity,
+confidence context, related files, resume fallback, and lower-priority debug
+fields. A target without a declared or contract-provided resume command is
+clearly marked unavailable.
 
 Started-command failures show the exit code, one bounded sanitized line from
 stderr (or stdout when stderr is empty), and a home-normalized command summary.
@@ -117,6 +121,10 @@ copies `codex resume <SESSION_ID>`; other actions can copy a declared ID, the
 resume UUID, or the target title. Opening the thread does not submit a prompt or
 start agent work. The extension never runs Codex CLI, opens Terminal, mutates
 Worktrail, or reimplements ranking.
+
+Archived runs are hidden by default. When **Include archived runs** is enabled,
+Worktrail ranks them lower and Raycast labels them `Archived`. Ignored Worktrail
+runs remain excluded independently of this preference.
 
 ## Troubleshooting
 

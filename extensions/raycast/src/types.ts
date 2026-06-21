@@ -29,9 +29,10 @@ export type ResumableTarget = {
   command?: { program: "codex"; args: string[] };
   lastActivity: string;
   sourceTool?: string;
+  archived?: boolean;
   confidence: "high" | "medium" | "low";
   score: number;
-  scoreVersion: 1;
+  scoreVersion: 1 | 2;
   signals: ResumeSignal[];
   relatedFiles: string[];
   relatedRuns: RelatedRun[];
