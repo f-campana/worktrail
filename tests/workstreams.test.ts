@@ -28,7 +28,7 @@ const fixtureDir = new URL("../fixtures/codex", import.meta.url).pathname;
 const currentThread = "00000000-0000-4000-8000-000000000002";
 const legacyThread = "00000000-0000-4000-8000-000000000001";
 
-test("existing version-one database migrates to workstream schema", async () => {
+test("existing version-one database migrates through project identity schema", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "worktrail-migration-"));
   const path = join(temporary, "worktrail.db");
   try {
@@ -59,7 +59,13 @@ test("existing version-one database migrates to workstream schema", async () => 
       );
       assert.equal(
         migrated.scalar(
-          "SELECT count(*) FROM schema_migrations WHERE version = 3",
+          "SELECT count(*) FROM schema_migrations WHERE version = 4",
+        ),
+        1,
+      );
+      assert.equal(
+        migrated.scalar(
+          "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'project_identities'",
         ),
         1,
       );

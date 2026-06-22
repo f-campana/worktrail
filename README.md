@@ -8,8 +8,10 @@ local web UI.
 Product vocabulary and the current Control Tower direction are documented in
 [`CONTEXT.md`](CONTEXT.md), the
 [`strategy digest`](docs/strategy/WORKTRAIL_CONVERSATION_DIGEST.md), and the
-[`daily report PRD`](docs/prd/control-tower-daily-report.md). The next product
-Fast Resume slice is specified in the
+[`daily report PRD`](docs/prd/control-tower-daily-report.md). The Project
+Identity + Aliases v0 foundation is specified in the
+[`Project Identity + Aliases v0 RFC`](docs/rfc/project-identity-aliases-v0.md).
+The completed Fast Resume foundation is specified in the
 [`Fast Resume PRD`](docs/prd/fast-resume.md) and
 [`ADR 0005`](docs/adr/0005-fast-resume-as-adoption-wedge.md).
 
@@ -27,6 +29,8 @@ explainable signals and inert, copyable command data but never executes Codex.
 Its JSON omits transcript excerpts, diffs, raw home paths, and credentials.
 Ranking is deterministic and field-aware: strong title/project/workstream/alias
 evidence outranks meaningful paths, generic files, and content-only matches.
+The JSON response remains schema version 1; project identity ranking uses score
+version 3 and additive project/alias signals.
 Archived Codex threads are hidden by default; `--include-archived` includes
 penalized targets with additive `archived: true` display metadata. Ignored
 Worktrail runs remain excluded.
@@ -216,6 +220,35 @@ non-Git directories do not fail the report; bounded diagnostics indicate that
 signals were unavailable. Commit and file lists are capped and expose explicit
 truncation flags in JSON. The report still describes activity only: completion,
 blockage, review, and delivery status are not inferred.
+
+## Project identity and aliases
+
+Indexing reconciles each source thread to one primary local project identity.
+Worktrail prefers the repository's local Git common directory, which groups
+linked worktrees from the same clone, and falls back to an existing canonical
+cwd for non-Git work. It stores an opaque path digest plus a home-normalized
+display path; it does not persist Git remotes in the identity projection.
+
+Project identities are derived automatically and are separate from
+workstreams. A repository such as `worktrail` is project context; a body of work
+such as `Fast Resume` remains a workstream or title intent.
+
+```sh
+pnpm worktrail projects list --db PATH
+pnpm worktrail projects aliases list --db PATH
+pnpm worktrail projects aliases add scaleway SC --allow-write --db PATH
+pnpm worktrail projects aliases remove SC --allow-write --db PATH
+```
+
+Project alias changes require `--allow-write` because aliases are explicit
+correction feedback. Worktrail never infers `SC → scaleway` from a title prefix;
+`SC` becomes a project alias only after the add command succeeds. Project
+identity currently comes from local Git/cwd observations, not Codex sidebar
+grouping. Re-indexing refreshes derived memberships without deleting manual
+aliases when a path is temporarily missing or moved.
+
+This identity layer is deterministic and local. It adds no RAG, embeddings,
+LLM calls, remote lookup, or project-management workflow.
 
 ## Workstream commands
 
@@ -426,6 +459,8 @@ Tests use only synthetic fixtures under `fixtures/codex/`.
 - File references outside structured patch events are regex detections and can
   have false positives or miss extensionless files.
 - `cwd` is a launch directory, not a guaranteed repository root.
+- Project identity is local to one filesystem/clone. Codex sidebar project
+  grouping and automatic title-prefix aliases are unavailable.
 - Search is lexical SQLite FTS with deterministic field-aware scoring. It does
   not perform semantic retrieval or full workstream state synthesis.
 - Deterministic workstream candidates are intentionally conservative and may

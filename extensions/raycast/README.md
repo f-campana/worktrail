@@ -108,6 +108,11 @@ confidence context, related files, resume fallback, and lower-priority debug
 fields. A target without a declared or contract-provided resume command is
 clearly marked unavailable.
 
+When Worktrail supplies identity signals, the compact match reason can read
+`project: scaleway` or `alias: SC → scaleway`. Raycast only renders these
+declared signals; it does not read SQLite, derive project membership, or infer
+aliases from titles.
+
 Started-command failures show the exit code, one bounded sanitized line from
 stderr (or stdout when stderr is empty), and a home-normalized command summary.
 The error action **Copy Debug Command** copies the shell-safe equivalent for a

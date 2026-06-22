@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { WorktrailDatabase } from "./db/database.js";
 import { TEXT_LIMITS } from "./limits.js";
 import { redactAndBound } from "./redaction.js";
+import { reconcileProjectIdentities } from "./projects.js";
 import { boundUtf8, contentHash } from "./text.js";
 import type {
   DiscoveredSource,
@@ -56,6 +57,7 @@ export async function importSources(
   };
   const affectedThreadIds = new Set<number>();
   const externalIds = new Set<string>();
+  const rawProjectCwds = new Map<number, string>();
 
   try {
     for await (const source of adapter.discover({
@@ -93,6 +95,7 @@ export async function importSources(
             stats,
             affectedThreadIds,
             externalIds,
+            rawProjectCwds,
           );
         }
         database.raw
@@ -166,6 +169,23 @@ export async function importSources(
       database.rebuildSearchDocument(threadId);
     }
 
+    for (const diagnostic of reconcileProjectIdentities(
+      database,
+      adapter.id,
+      rawProjectCwds,
+    )) {
+      insertDiagnostic(
+        database,
+        runId,
+        diagnostic.sourceId,
+        diagnostic.threadId,
+        diagnostic.code,
+        diagnostic.detail,
+        null,
+      );
+      stats.diagnostics += 1;
+    }
+
     finishRun(database, stats, "completed");
     return stats;
   } catch (error) {
@@ -183,6 +203,7 @@ function persistEvent(
   stats: IndexStats,
   affectedThreadIds: Set<number>,
   externalIds: Set<string>,
+  rawProjectCwds: Map<number, string>,
 ): void {
   if (event.kind === "diagnostic") {
     insertDiagnostic(
@@ -240,6 +261,7 @@ function persistEvent(
     state.externalId = event.externalId;
     externalIds.add(event.externalId);
     affectedThreadIds.add(result.id);
+    if (event.cwd) rawProjectCwds.set(result.id, event.cwd);
     stats.threads += 1;
     database.raw
       .prepare("UPDATE sources SET external_id = ?, archived = ? WHERE id = ?")

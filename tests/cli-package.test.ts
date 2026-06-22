@@ -29,6 +29,7 @@ test("build emits a directly executable CLI with runtime migrations", async () =
     "001_initial.sql",
     "002_workstreams.sql",
     "003_workstream_quality.sql",
+    "004_project_identities.sql",
   ]) {
     await access(resolve("dist/db/migrations", migration));
   }

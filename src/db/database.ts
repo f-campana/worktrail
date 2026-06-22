@@ -27,6 +27,14 @@ const MIGRATIONS = [
       "utf8",
     ),
   },
+  {
+    version: 4,
+    name: "project-identities",
+    sql: readFileSync(
+      new URL("./migrations/004_project_identities.sql", import.meta.url),
+      "utf8",
+    ),
+  },
 ] as const;
 
 type SourceRow = {

@@ -210,7 +210,7 @@ test("resume prioritizes project paths and meaningful files over generic files",
     assert.equal(project.targets[0]?.confidence, "high");
     assert.ok(
       project.targets[0]?.signals.some(
-        (signal) => signal.type === "exact-project-match",
+        (signal) => signal.type === "project-path-match",
       ),
     );
 

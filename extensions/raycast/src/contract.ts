@@ -71,7 +71,7 @@ function parseTarget(input: unknown, path: string): ResumableTarget {
     score: finiteNumber(value.score, `${path}.score`),
     scoreVersion: oneOf(
       value.scoreVersion,
-      [1, 2] as const,
+      [1, 2, 3] as const,
       `${path}.scoreVersion`,
     ),
     signals: array(value.signals, `${path}.signals`).map((signal, index) =>

@@ -178,6 +178,44 @@ test("derives compact display metadata", () => {
   assert.equal(display.opensInCodex, true);
 });
 
+test("renders project identity and explicit alias reasons compactly", () => {
+  const project = deriveTargetDisplay(
+    {
+      ...target,
+      scoreVersion: 3,
+      signals: [
+        {
+          type: "project-identity-match",
+          label: "Project “scaleway” matched",
+        },
+        {
+          type: "project-membership",
+          label: "Primary project membership: scaleway",
+        },
+      ],
+    },
+    new Date("2026-06-21T12:00:00.000Z"),
+  );
+  assert.equal(project.subtitle, "Codex · yesterday · project: scaleway");
+
+  const alias = deriveTargetDisplay(
+    {
+      ...target,
+      scoreVersion: 3,
+      signals: [
+        {
+          type: "project-alias-match",
+          label: "Project alias “SC → scaleway” matched",
+        },
+      ],
+    },
+    new Date("2026-06-21T12:00:00.000Z"),
+  );
+  assert.equal(alias.subtitle, "Codex · yesterday · alias: SC → scaleway");
+  assert.equal(targetActions(target)[0]?.kind, "open-codex");
+  assert.equal(targetActions(target)[1]?.kind, "copy-command");
+});
+
 test("shows only compact confidence and archive row badges", () => {
   const display = deriveTargetDisplay(
     { ...target, archived: true, confidence: "medium" },

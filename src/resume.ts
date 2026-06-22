@@ -2,7 +2,7 @@ import type { WorktrailDatabase } from "./db/database.js";
 import { queryTerms, searchThreads, type SearchResult } from "./search.js";
 
 export const RESUME_SEARCH_SCHEMA_VERSION = 1 as const;
-export const RESUME_SCORE_VERSION = 2 as const;
+export const RESUME_SCORE_VERSION = 3 as const;
 
 export type ResumeSignal = {
   type: string;
@@ -339,6 +339,36 @@ function matchSignals(match: SearchResult, query: string): ResumeSignal[] {
   const signals: ResumeSignal[] = [];
   const details = match.matchDetails;
   const sourceIds = [match.externalId];
+  if (match.projectMatch?.kind === "alias") {
+    signals.push({
+      type: "project-alias-match",
+      label: `Project alias “${match.projectMatch.matchedValue} → ${match.projectMatch.projectName}” matched`,
+      weight: 0.37,
+      sourceIds,
+    });
+  } else if (match.projectMatch?.kind === "identity") {
+    signals.push({
+      type: "project-identity-match",
+      label: `Project “${match.projectMatch.projectName}” matched`,
+      weight: 0.36,
+      sourceIds,
+    });
+  } else if (match.projectMatch?.kind === "path") {
+    signals.push({
+      type: "project-path-match",
+      label: `Project path matched “${query}”`,
+      weight: 0.3,
+      sourceIds,
+    });
+  }
+  if (match.projectMatch) {
+    signals.push({
+      type: "project-membership",
+      label: `Primary project membership: ${match.projectMatch.projectName}`,
+      weight: match.projectMatch.keyKind === "git-common-dir" ? 0.12 : 0.08,
+      sourceIds,
+    });
+  }
   if (match.aliasMatch) {
     signals.push({
       type: "alias-match",
@@ -378,7 +408,7 @@ function matchSignals(match: SearchResult, query: string): ResumeSignal[] {
   }
   if (details.projectExact || details.projectTerms.length > 0) {
     signals.push({
-      type: details.projectExact ? "exact-project-match" : "project-path-match",
+      type: "project-path-match",
       label: `Project path matched ${quotedTerms(
         details.projectExact ? queryTerms(query) : details.projectTerms,
       )}`,

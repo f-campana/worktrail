@@ -12,6 +12,12 @@ import { buildStateResponse, type StateCard } from "./state.js";
 import { buildDailyReport, type DailyReport } from "./report.js";
 import { findResumableTargets, type ResumeSearchResult } from "./resume.js";
 import {
+  addProjectAlias,
+  listProjectAliases,
+  listProjects,
+  removeProjectAlias,
+} from "./projects.js";
+import {
   assignThread,
   addWorkstreamAlias,
   createWorkstream,
@@ -65,6 +71,11 @@ async function main(): Promise<void> {
 
   if (args.command === "workstreams") {
     runWorkstreams(args);
+    return;
+  }
+
+  if (args.command === "projects") {
+    runProjects(args);
     return;
   }
 
@@ -423,6 +434,75 @@ function runWorkstreams(args: ParsedArgs): void {
   }
 }
 
+function runProjects(args: ParsedArgs): void {
+  const [action, subaction, ...values] = args.positional;
+  const dbPath = databasePath(args, args.flags.has("fixtures"));
+  const database = new WorktrailDatabase(dbPath);
+  try {
+    if (action === "list") {
+      const projects = listProjects(database);
+      if (args.flags.has("json")) {
+        console.log(JSON.stringify({ projects }, null, 2));
+      } else if (projects.length === 0) {
+        console.log(
+          "No project identities derived. Run worktrail index first.",
+        );
+      } else {
+        for (const project of projects) {
+          console.log(
+            `${project.id}\t${project.name}\t${project.keyKind}\t${project.threadCount} thread${project.threadCount === 1 ? "" : "s"}`,
+          );
+        }
+      }
+      return;
+    }
+
+    if (action === "aliases" && subaction === "list") {
+      const aliases = listProjectAliases(database, values[0]);
+      if (args.flags.has("json")) {
+        console.log(JSON.stringify({ aliases }, null, 2));
+      } else if (aliases.length === 0) {
+        console.log("No project aliases configured.");
+      } else {
+        for (const item of aliases) {
+          console.log(`${item.alias}\t${item.projectName}\t${item.projectId}`);
+        }
+      }
+      return;
+    }
+
+    if (action === "aliases" && subaction === "add") {
+      requireWritePermission(args);
+      const [project, ...aliasParts] = values;
+      const alias = aliasParts.join(" ").trim();
+      if (!project || !alias) {
+        throw new Error("projects aliases add requires PROJECT and ALIAS.");
+      }
+      printMutation(args, {
+        action: "project-alias-added",
+        alias: addProjectAlias(database, project, alias),
+      });
+      return;
+    }
+
+    if (action === "aliases" && subaction === "remove") {
+      requireWritePermission(args);
+      const alias = values.join(" ").trim();
+      if (!alias) throw new Error("projects aliases remove requires ALIAS.");
+      printMutation(args, {
+        action: "project-alias-removed",
+        alias,
+        changed: removeProjectAlias(database, alias),
+      });
+      return;
+    }
+
+    throw new Error("projects requires list or aliases list/add/remove.");
+  } finally {
+    database.close();
+  }
+}
+
 function runEval(args: ParsedArgs): void {
   const inputPath = args.positional[0];
   if (!inputPath) throw new Error("eval requires a query JSON file.");
@@ -642,6 +722,14 @@ function printMutation(
   }
 }
 
+function requireWritePermission(args: ParsedArgs): void {
+  if (!args.flags.has("allow-write")) {
+    throw new Error(
+      "Project alias changes require --allow-write because they persist correction feedback.",
+    );
+  }
+}
+
 function parseArgs(argv: string[]): ParsedArgs {
   const [command, ...rest] = argv;
   const flags = new Map<string, string | boolean>();
@@ -710,6 +798,10 @@ Usage:
   worktrail workstreams alias remove WORKSTREAM_ID "alias" [--db PATH] [--json]
   worktrail workstreams aliases WORKSTREAM_ID [--db PATH] [--json]
   worktrail workstreams merge SOURCE_WORKSTREAM_ID TARGET_WORKSTREAM_ID [--db PATH] [--json]
+  worktrail projects list [--db PATH] [--json]
+  worktrail projects aliases list [PROJECT] [--db PATH] [--json]
+  worktrail projects aliases add PROJECT "alias" --allow-write [--db PATH] [--json]
+  worktrail projects aliases remove "alias" --allow-write [--db PATH] [--json]
   worktrail threads assign THREAD_UUID WORKSTREAM_ID [--db PATH] [--json]
   worktrail threads unassign THREAD_UUID [--db PATH] [--json]
   worktrail threads ignore THREAD_UUID [--db PATH] [--reason TEXT] [--json]

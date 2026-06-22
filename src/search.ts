@@ -35,6 +35,13 @@ export type SearchResult = {
   fileReferences: string[];
   matchDetails: SearchMatchDetails;
   aliasMatch?: string;
+  projectMatch?: {
+    kind: "identity" | "alias" | "path";
+    projectName: string;
+    matchedValue: string;
+    keyKind: "git-common-dir" | "cwd";
+    membershipConfidence: "high" | "medium" | "low";
+  };
 };
 
 export type SearchOptions = {
@@ -139,15 +146,13 @@ export function searchThreads(
     ) as RankedThreadRow[];
 
   const combinedRows = new Map(rows.map((row) => [row.external_id, row]));
-  if (rows.length === 0) {
-    for (const row of identityFallbackRows(
-      database,
-      query,
-      candidateLimit,
-      options,
-    )) {
-      combinedRows.set(row.external_id, row);
-    }
+  for (const row of identityFallbackRows(
+    database,
+    query,
+    candidateLimit,
+    options,
+  )) {
+    combinedRows.set(row.external_id, row);
   }
 
   const combined = new Map<string, SearchResult>();
@@ -171,6 +176,15 @@ export function searchThreads(
       combined.set(result.externalId, result);
     } else if (result.aliasMatch) {
       existing.aliasMatch = result.aliasMatch;
+    }
+  }
+
+  for (const result of projectThreadMatches(database, query, terms, options)) {
+    const existing = combined.get(result.externalId);
+    if (!existing || result.score > existing.score) {
+      combined.set(result.externalId, result);
+    } else if (result.projectMatch) {
+      existing.projectMatch = result.projectMatch;
     }
   }
 
@@ -313,9 +327,9 @@ function rankMatch(
   const titleScore = details.exactTitle
     ? 0.99
     : details.titlePrefix
-      ? 0.95
+      ? 0.985
       : details.titlePhrase
-        ? 0.93
+        ? 0.98
         : termCount > 1 && titleCoverage === 1
           ? 0.88
           : titleCoverage > 0
@@ -505,6 +519,152 @@ function aliasScore(
     return undefined;
   const score = (exact ? 0.97 : 0.88) - (archived ? 0.03 : 0);
   return { score: Number(score.toFixed(3)), confidence: "high" };
+}
+
+function projectThreadMatches(
+  database: WorktrailDatabase,
+  query: string,
+  terms: string[],
+  options: SearchOptions,
+): SearchResult[] {
+  const rows = database.raw
+    .prepare(
+      `SELECT t.id, t.external_id, t.resume_ref, t.title, t.source_tool,
+              t.archived, t.updated_at, t.cwd, p.name AS project_name,
+              p.key_kind, p.display_path, m.confidence AS membership_confidence,
+              group_concat(a.alias, char(10)) AS project_aliases,
+              d.title AS title_text, d.cwd AS cwd_text,
+              d.file_references, d.searchable_text, 0 AS rank
+       FROM project_thread_memberships m
+       JOIN project_identities p
+         ON p.id = m.project_id AND p.status = 'active'
+       JOIN source_threads t ON t.id = m.thread_id
+       JOIN search_documents d ON d.thread_id = t.id
+       LEFT JOIN project_aliases a ON a.project_id = p.id
+       LEFT JOIN ignored_threads i ON i.thread_id = t.id
+       WHERE m.role = 'primary' AND (? = 1 OR i.thread_id IS NULL)
+       GROUP BY t.id, p.id
+       ORDER BY t.updated_at DESC, t.external_id`,
+    )
+    .all(Number(options.includeIgnored ?? false)) as Array<
+    RankedThreadRow & {
+      project_name: string;
+      key_kind: "git-common-dir" | "cwd";
+      display_path: string | null;
+      membership_confidence: "high" | "medium" | "low";
+      project_aliases: string | null;
+    }
+  >;
+  const output: SearchResult[] = [];
+  for (const row of rows) {
+    const project = projectScore(
+      query,
+      terms,
+      row.project_name,
+      row.display_path,
+      row.project_aliases?.split("\n") ?? [],
+      Boolean(row.archived),
+    );
+    if (!project) continue;
+    const details = analyzeMatch(row, query, terms);
+    const result = toSearchResult(
+      database,
+      row,
+      terms,
+      details,
+      project.ranking,
+    );
+    result.projectMatch = {
+      kind: project.kind,
+      projectName: row.project_name,
+      matchedValue: project.matchedValue,
+      keyKind: row.key_kind,
+      membershipConfidence: row.membership_confidence,
+    };
+    output.push(result);
+  }
+  return output;
+}
+
+function projectScore(
+  query: string,
+  terms: string[],
+  name: string,
+  displayPath: string | null,
+  aliases: string[],
+  archived: boolean,
+):
+  | {
+      kind: "identity" | "alias" | "path";
+      matchedValue: string;
+      ranking: { score: number; confidence: SearchResult["confidence"] };
+    }
+  | undefined {
+  const compactQuery = compactIdentity(query);
+  const alias = aliases.find(
+    (candidate) => compactIdentity(candidate) === compactQuery,
+  );
+  if (alias) {
+    return {
+      kind: "alias",
+      matchedValue: alias,
+      ranking: {
+        score: Number((0.97 - (archived ? 0.03 : 0)).toFixed(3)),
+        confidence: "high",
+      },
+    };
+  }
+
+  const nameTerms = queryTerms(name);
+  const nameSet = new Set(nameTerms);
+  const nameExact = compactIdentity(name) === compactQuery;
+  const nameCoverage =
+    terms.filter((term) => nameSet.has(term)).length / terms.length;
+  if (nameExact || (terms.length > 1 && nameCoverage === 1)) {
+    return {
+      kind: "identity",
+      matchedValue: name,
+      ranking: {
+        score: Number(
+          ((nameExact ? 0.96 : 0.88) - (archived ? 0.03 : 0)).toFixed(3),
+        ),
+        confidence: "high",
+      },
+    };
+  }
+  if (nameCoverage > 0) {
+    return {
+      kind: "identity",
+      matchedValue: name,
+      ranking: {
+        score: Number(
+          (0.66 + nameCoverage * 0.12 - (archived ? 0.1 : 0)).toFixed(3),
+        ),
+        confidence: "medium",
+      },
+    };
+  }
+
+  if (displayPath) {
+    const pathTerms = terms.filter((term) =>
+      containsIdentity(displayPath, term),
+    );
+    const pathExact =
+      compactIdentity(pathBasename(displayPath)) === compactQuery;
+    if (pathExact || (terms.length > 1 && pathTerms.length === terms.length)) {
+      return {
+        kind: "path",
+        matchedValue: query,
+        ranking: {
+          score: Number(
+            ((pathExact ? 0.92 : 0.84) - (archived ? 0.03 : 0)).toFixed(3),
+          ),
+          confidence: "high",
+        },
+      };
+    }
+  }
+  return undefined;
 }
 
 function fileScore(path: string, terms: string[]): number {

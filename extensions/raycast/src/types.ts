@@ -32,7 +32,7 @@ export type ResumableTarget = {
   archived?: boolean;
   confidence: "high" | "medium" | "low";
   score: number;
-  scoreVersion: 1 | 2;
+  scoreVersion: 1 | 2 | 3;
   signals: ResumeSignal[];
   relatedFiles: string[];
   relatedRuns: RelatedRun[];

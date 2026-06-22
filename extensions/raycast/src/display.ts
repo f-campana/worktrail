@@ -210,6 +210,7 @@ function compactMatchLabel(target: ResumableTarget): string {
         "recent-activity",
         "unassigned-run",
         "manual-assignment",
+        "project-membership",
         "archived-penalty",
       ].includes(item.type),
   );
@@ -226,6 +227,10 @@ function compactMatchLabel(target: ResumableTarget): string {
     case "exact-project-match":
     case "project-path-match":
       return quoted ? `project: ${quoted}` : "project match";
+    case "project-identity-match":
+      return quoted ? `project: ${quoted}` : "project match";
+    case "project-alias-match":
+      return quoted ? `alias: ${quoted}` : "project alias match";
     case "alias-match":
       return quoted ? `alias: ${quoted}` : "alias match";
     case "exact-entity-match":
