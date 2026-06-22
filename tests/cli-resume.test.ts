@@ -42,6 +42,35 @@ test("resume CLI validates query and renders human and JSON output", async () =>
       { encoding: "utf8" },
     );
     assert.equal(JSON.parse(json.stdout).schemaVersion, 1);
+    const timed = spawnSync(
+      cli,
+      [
+        "src/cli.ts",
+        "resume",
+        "daily report",
+        "--db",
+        dbPath,
+        "--json",
+        "--debug-timing",
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(timed.status, 0);
+    assert.equal(JSON.parse(timed.stdout).schemaVersion, 1);
+    const timingLine = timed.stderr
+      .split("\n")
+      .find((line) => line.startsWith("[worktrail timing] "));
+    assert.ok(timingLine);
+    const timing = JSON.parse(timingLine.slice(19)) as {
+      command: string;
+      durationMs: number;
+      phases: Record<string, number>;
+    };
+    assert.equal(timing.command, "resume");
+    assert.ok(timing.durationMs >= 0);
+    assert.ok(timing.phases["search-ranking"]! >= 0);
+    assert.doesNotMatch(timingLine, /daily report/);
+    assert.doesNotMatch(timingLine, new RegExp(dbPath));
     const missing = spawnSync(cli, ["src/cli.ts", "resume"], {
       encoding: "utf8",
     });
@@ -51,6 +80,38 @@ test("resume CLI validates query and renders human and JSON output", async () =>
     try {
       database.close();
     } catch {}
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("read-only resume skips migration and write setup", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "worktrail-read-only-"));
+  const dbPath = join(directory, "worktrail.db");
+  const writable = new WorktrailDatabase(dbPath);
+  try {
+    const id = syntheticId(302);
+    insertSyntheticThread(writable, {
+      externalId: id,
+      title: "Read-only resume",
+      cwd: "/repo",
+      updatedAt: "2026-06-20T10:00:00.000Z",
+      evidence: ["read-only resume"],
+      files: ["src/resume.ts"],
+    });
+  } finally {
+    writable.close();
+  }
+
+  const readOnly = new WorktrailDatabase(dbPath, { readOnly: true });
+  try {
+    assert.equal(readOnly.scalar("PRAGMA query_only"), 1);
+    assert.throws(() =>
+      readOnly.raw.exec(
+        "INSERT INTO schema_migrations(version, name, applied_at) VALUES (99, 'forbidden', 'now')",
+      ),
+    );
+  } finally {
+    readOnly.close();
     await rm(directory, { recursive: true, force: true });
   }
 });

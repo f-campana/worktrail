@@ -46,7 +46,21 @@ export type SearchResult = {
 
 export type SearchOptions = {
   includeIgnored?: boolean;
+  rankingLimit?: number;
+  detailLimit?: number;
+  selectionExcludeArchived?: boolean;
+  selectionTieBreakByTitle?: boolean;
+  timing?: (phase: SearchTimingPhase, durationMs: number) => void;
 };
+
+export type SearchTimingPhase =
+  | "fts-candidates"
+  | "identity-fallback"
+  | "content-matches"
+  | "candidate-ranking"
+  | "workstream-aliases"
+  | "project-identities"
+  | "result-hydration";
 
 type RankedThreadRow = {
   id: number;
@@ -114,9 +128,10 @@ export function searchThreads(
     .map((term) => `"${term.replaceAll('"', '""')}"`)
     .join(" OR ");
 
-  const rows = database.raw
-    .prepare(
-      `SELECT
+  const rows = measureSearch(options, "fts-candidates", () =>
+    database.raw
+      .prepare(
+        `SELECT
          t.id,
          t.external_id,
          t.resume_ref,
@@ -129,7 +144,7 @@ export function searchThreads(
          d.title AS title_text,
          d.cwd AS cwd_text,
          d.file_references,
-         d.searchable_text
+         '' AS searchable_text
        FROM thread_search
        JOIN search_documents d ON d.thread_id = thread_search.rowid
        JOIN source_threads t ON t.id = d.thread_id
@@ -138,39 +153,35 @@ export function searchThreads(
          AND (? = 1 OR i.thread_id IS NULL)
        ORDER BY rank ASC, t.updated_at DESC
        LIMIT ?`,
-    )
-    .all(
-      ftsQuery,
-      Number(options.includeIgnored ?? false),
-      candidateLimit,
-    ) as RankedThreadRow[];
+      )
+      .all(ftsQuery, Number(options.includeIgnored ?? false), candidateLimit),
+  ) as RankedThreadRow[];
 
   const combinedRows = new Map(rows.map((row) => [row.external_id, row]));
-  for (const row of identityFallbackRows(
-    database,
-    query,
-    candidateLimit,
-    options,
-  )) {
+  const fallbackRows = measureSearch(options, "identity-fallback", () =>
+    identityFallbackRows(database, query, candidateLimit, options),
+  );
+  for (const row of fallbackRows) {
     combinedRows.set(row.external_id, row);
   }
-
   const combined = new Map<string, SearchResult>();
-  for (const row of combinedRows.values()) {
-    const matchDetails = analyzeMatch(row, query, terms);
-    if (matchDetails.matchedTerms.length === 0) continue;
-    const ranking = rankMatch(
-      matchDetails,
-      terms.length,
-      Boolean(row.archived),
-    );
-    combined.set(
-      row.external_id,
-      toSearchResult(database, row, terms, matchDetails, ranking),
-    );
-  }
+  measureSearch(options, "candidate-ranking", () => {
+    for (const row of combinedRows.values()) {
+      const matchDetails = analyzeMatch(row, query, terms);
+      if (matchDetails.matchedTerms.length === 0) continue;
+      const ranking = rankMatch(
+        matchDetails,
+        terms.length,
+        Boolean(row.archived),
+      );
+      combined.set(row.external_id, toSearchResult(row, matchDetails, ranking));
+    }
+  });
 
-  for (const result of aliasThreadMatches(database, query, terms, options)) {
+  const aliasMatches = measureSearch(options, "workstream-aliases", () =>
+    aliasThreadMatches(database, query, terms, options),
+  );
+  for (const result of aliasMatches) {
     const existing = combined.get(result.externalId);
     if (!existing || result.score > existing.score) {
       combined.set(result.externalId, result);
@@ -179,7 +190,10 @@ export function searchThreads(
     }
   }
 
-  for (const result of projectThreadMatches(database, query, terms, options)) {
+  const projectMatches = measureSearch(options, "project-identities", () =>
+    projectThreadMatches(database, query, terms, outputLimit, options),
+  );
+  for (const result of projectMatches) {
     const existing = combined.get(result.externalId);
     if (!existing || result.score > existing.score) {
       combined.set(result.externalId, result);
@@ -188,14 +202,105 @@ export function searchThreads(
     }
   }
 
-  return [...combined.values()]
-    .sort(
-      (left, right) =>
-        right.score - left.score ||
-        right.lastActivity.localeCompare(left.lastActivity) ||
-        left.externalId.localeCompare(right.externalId),
+  const selectionResults = [...combined.values()].filter(
+    (result) => !options.selectionExcludeArchived || !result.archived,
+  );
+  const preliminary = rankSearchResults(
+    selectionResults,
+    options.selectionTieBreakByTitle,
+  );
+  const maxContentScore = terms.length === 1 ? 0.34 : 0.6;
+  const rankingLimit = Math.max(
+    1,
+    Math.min(options.rankingLimit ?? outputLimit, outputLimit),
+  );
+  const threshold = preliminary[rankingLimit - 1]?.score;
+  const contentCandidateIds =
+    threshold === undefined || threshold <= maxContentScore
+      ? [...combinedRows.values()].map((row) => row.id)
+      : preliminary.slice(0, rankingLimit).flatMap((result) => {
+          const row = combinedRows.get(result.externalId);
+          return row ? [row.id] : [];
+        });
+  const contentMatches = measureSearch(options, "content-matches", () =>
+    contentTermMatches(database, terms, contentCandidateIds),
+  );
+  const contentCandidateSet = new Set(contentCandidateIds);
+  for (const row of combinedRows.values()) {
+    if (!contentCandidateSet.has(row.id)) continue;
+    const matchDetails = analyzeMatch(
+      row,
+      query,
+      terms,
+      contentMatches.get(row.id),
+    );
+    if (matchDetails.matchedTerms.length === 0) continue;
+    const ranking = rankMatch(
+      matchDetails,
+      terms.length,
+      Boolean(row.archived),
+    );
+    const result = toSearchResult(row, matchDetails, ranking);
+    const previous = combined.get(row.external_id);
+    if (previous?.aliasMatch) result.aliasMatch = previous.aliasMatch;
+    if (previous?.projectMatch) result.projectMatch = previous.projectMatch;
+    if (previous && previous.score > result.score) {
+      previous.matchDetails = matchDetails;
+    } else {
+      combined.set(row.external_id, result);
+    }
+  }
+
+  const ranked = rankSearchResults(combined.values()).slice(0, outputLimit);
+  const detailLimit = Math.max(
+    0,
+    Math.min(options.detailLimit ?? outputLimit, outputLimit),
+  );
+  const detailedIds = new Set(
+    rankSearchResults(
+      ranked.filter(
+        (result) => !options.selectionExcludeArchived || !result.archived,
+      ),
+      options.selectionTieBreakByTitle,
     )
-    .slice(0, outputLimit);
+      .slice(0, detailLimit)
+      .map((result) => result.externalId),
+  );
+  return measureSearch(options, "result-hydration", () =>
+    ranked.map((result) =>
+      detailedIds.has(result.externalId)
+        ? hydrateSearchResult(database, result, terms)
+        : result,
+    ),
+  );
+}
+
+function rankSearchResults(
+  results: Iterable<SearchResult>,
+  tieBreakByTitle = false,
+): SearchResult[] {
+  return [...results].sort(
+    (left, right) =>
+      right.score - left.score ||
+      right.lastActivity.localeCompare(left.lastActivity) ||
+      (tieBreakByTitle
+        ? (left.title ?? left.externalId).localeCompare(
+            right.title ?? right.externalId,
+          )
+        : 0) ||
+      left.externalId.localeCompare(right.externalId),
+  );
+}
+
+function measureSearch<T>(
+  options: SearchOptions,
+  phase: SearchTimingPhase,
+  operation: () => T,
+): T {
+  const startedAt = performance.now();
+  const result = operation();
+  options.timing?.(phase, performance.now() - startedAt);
+  return result;
 }
 
 function identityFallbackRows(
@@ -213,7 +318,7 @@ function identityFallbackRows(
       `SELECT t.id, t.external_id, t.resume_ref, t.title, t.source_tool,
               t.archived, t.updated_at, t.cwd, 0 AS rank,
               d.title AS title_text, d.cwd AS cwd_text,
-              d.file_references, d.searchable_text
+              d.file_references, '' AS searchable_text
        FROM search_documents d
        JOIN source_threads t ON t.id = d.thread_id
        LEFT JOIN ignored_threads i ON i.thread_id = t.id
@@ -238,6 +343,7 @@ function analyzeMatch(
   row: RankedThreadRow,
   query: string,
   terms: string[],
+  matchedContentTerms?: ReadonlySet<string>,
 ): SearchMatchDetails {
   const title = row.title_text;
   const titleTerms = terms.filter((term) => containsTerm(title, term));
@@ -280,9 +386,9 @@ function analyzeMatch(
     else genericFileTerms.push(term);
   }
 
-  const contentTerms = terms.filter((term) =>
-    containsTerm(row.searchable_text, term),
-  );
+  const contentTerms = matchedContentTerms
+    ? terms.filter((term) => matchedContentTerms.has(term))
+    : terms.filter((term) => containsTerm(row.searchable_text, term));
   const matchedTerms = unique([
     ...titleTerms,
     ...projectTerms,
@@ -303,6 +409,52 @@ function analyzeMatch(
     contentTerms,
     matchedTerms,
   };
+}
+
+function contentTermMatches(
+  database: WorktrailDatabase,
+  terms: string[],
+  threadIds: number[],
+): Map<number, Set<string>> {
+  const matches = new Map<number, Set<string>>();
+  if (threadIds.length === 0) return matches;
+  const patterns = new Map<string, RegExp>();
+  database.raw.function(
+    "worktrail_contains_term",
+    { deterministic: true, directOnly: true },
+    (value, term) => {
+      if (typeof value !== "string" || typeof term !== "string") return 0;
+      let pattern = patterns.get(term);
+      if (!pattern) {
+        const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        pattern = new RegExp(
+          `(^|[^\\p{L}\\p{N}_])${escaped}($|[^\\p{L}\\p{N}_])`,
+          "iu",
+        );
+        patterns.set(term, pattern);
+      }
+      return pattern.test(value) ? 1 : 0;
+    },
+  );
+  const placeholders = threadIds.map(() => "?").join(",");
+  for (const term of terms) {
+    const rows = database.raw
+      .prepare(
+        `SELECT thread_id
+         FROM search_documents
+         WHERE thread_id IN (${placeholders})
+           AND worktrail_contains_term(searchable_text, ?) = 1`,
+      )
+      .all(...threadIds, term) as Array<{
+      thread_id: number;
+    }>;
+    for (const row of rows) {
+      const rowMatches = matches.get(row.thread_id) ?? new Set<string>();
+      rowMatches.add(term);
+      matches.set(row.thread_id, rowMatches);
+    }
+  }
+  return matches;
 }
 
 function rankMatch(
@@ -384,9 +536,7 @@ function rankMatch(
 }
 
 function toSearchResult(
-  database: WorktrailDatabase,
   row: RankedThreadRow,
-  terms: string[],
   matchDetails: SearchMatchDetails,
   ranking: { score: number; confidence: SearchResult["confidence"] },
 ): SearchResult {
@@ -399,9 +549,25 @@ function toSearchResult(
     lastActivity: row.updated_at,
     ...(row.cwd ? { cwd: row.cwd } : {}),
     ...ranking,
+    evidence: [],
+    fileReferences: [],
+    matchDetails,
+  };
+}
+
+function hydrateSearchResult(
+  database: WorktrailDatabase,
+  result: SearchResult,
+  terms: string[],
+): SearchResult {
+  const row = database.raw
+    .prepare("SELECT id, cwd FROM source_threads WHERE external_id = ?")
+    .get(result.externalId) as { id: number; cwd: string | null } | undefined;
+  if (!row) return result;
+  return {
+    ...result,
     evidence: matchingEvidence(database, row.id, terms),
     fileReferences: matchingFiles(database, row.id, terms, row.cwd),
-    matchDetails,
   };
 }
 
@@ -475,7 +641,7 @@ function aliasThreadMatches(
       `SELECT t.id, t.external_id, t.resume_ref, t.title, t.source_tool,
               t.archived, t.updated_at, t.cwd, a.alias,
               d.title AS title_text, d.cwd AS cwd_text,
-              d.file_references, d.searchable_text, 0 AS rank
+              d.file_references, '' AS searchable_text, 0 AS rank
        FROM workstream_aliases a
        JOIN workstreams w ON w.id = a.workstream_id AND w.status = 'active'
        JOIN workstream_assignments wa ON wa.workstream_id = w.id
@@ -487,12 +653,22 @@ function aliasThreadMatches(
     .all(Number(options.includeIgnored ?? false)) as Array<
     RankedThreadRow & { alias: string }
   >;
+  const contentMatches = contentTermMatches(
+    database,
+    terms,
+    rows.map((row) => row.id),
+  );
   const best = new Map<string, SearchResult>();
   for (const row of rows) {
     const ranking = aliasScore(query, row.alias, Boolean(row.archived));
     if (!ranking) continue;
-    const matchDetails = analyzeMatch(row, query, terms);
-    const result = toSearchResult(database, row, terms, matchDetails, ranking);
+    const matchDetails = analyzeMatch(
+      row,
+      query,
+      terms,
+      contentMatches.get(row.id),
+    );
+    const result = toSearchResult(row, matchDetails, ranking);
     result.aliasMatch = row.alias;
     const previous = best.get(row.external_id);
     if (!previous || result.score > previous.score)
@@ -525,6 +701,7 @@ function projectThreadMatches(
   database: WorktrailDatabase,
   query: string,
   terms: string[],
+  limit: number,
   options: SearchOptions,
 ): SearchResult[] {
   const rows = database.raw
@@ -532,14 +709,11 @@ function projectThreadMatches(
       `SELECT t.id, t.external_id, t.resume_ref, t.title, t.source_tool,
               t.archived, t.updated_at, t.cwd, p.name AS project_name,
               p.key_kind, p.display_path, m.confidence AS membership_confidence,
-              group_concat(a.alias, char(10)) AS project_aliases,
-              d.title AS title_text, d.cwd AS cwd_text,
-              d.file_references, d.searchable_text, 0 AS rank
+              group_concat(a.alias, char(10)) AS project_aliases
        FROM project_thread_memberships m
        JOIN project_identities p
          ON p.id = m.project_id AND p.status = 'active'
        JOIN source_threads t ON t.id = m.thread_id
-       JOIN search_documents d ON d.thread_id = t.id
        LEFT JOIN project_aliases a ON a.project_id = p.id
        LEFT JOIN ignored_threads i ON i.thread_id = t.id
        WHERE m.role = 'primary' AND (? = 1 OR i.thread_id IS NULL)
@@ -547,7 +721,17 @@ function projectThreadMatches(
        ORDER BY t.updated_at DESC, t.external_id`,
     )
     .all(Number(options.includeIgnored ?? false)) as Array<
-    RankedThreadRow & {
+    Pick<
+      RankedThreadRow,
+      | "id"
+      | "external_id"
+      | "resume_ref"
+      | "title"
+      | "source_tool"
+      | "archived"
+      | "updated_at"
+      | "cwd"
+    > & {
       project_name: string;
       key_kind: "git-common-dir" | "cwd";
       display_path: string | null;
@@ -555,8 +739,7 @@ function projectThreadMatches(
       project_aliases: string | null;
     }
   >;
-  const output: SearchResult[] = [];
-  for (const row of rows) {
+  const candidates = rows.flatMap((row) => {
     const project = projectScore(
       query,
       terms,
@@ -565,15 +748,44 @@ function projectThreadMatches(
       row.project_aliases?.split("\n") ?? [],
       Boolean(row.archived),
     );
-    if (!project) continue;
-    const details = analyzeMatch(row, query, terms);
-    const result = toSearchResult(
-      database,
-      row,
+    return project ? [{ row, project }] : [];
+  });
+  candidates.sort(
+    (left, right) =>
+      right.project.ranking.score - left.project.ranking.score ||
+      right.row.updated_at.localeCompare(left.row.updated_at) ||
+      left.row.external_id.localeCompare(right.row.external_id),
+  );
+
+  const output: SearchResult[] = [];
+  const selected = candidates.slice(0, limit);
+  const contentMatches = contentTermMatches(
+    database,
+    terms,
+    selected.map(({ row }) => row.id),
+  );
+  for (const { row, project } of selected) {
+    const document = database.raw
+      .prepare(
+        `SELECT title AS title_text, cwd AS cwd_text,
+                file_references, '' AS searchable_text
+         FROM search_documents WHERE thread_id = ?`,
+      )
+      .get(row.id) as
+      | Pick<
+          RankedThreadRow,
+          "title_text" | "cwd_text" | "file_references" | "searchable_text"
+        >
+      | undefined;
+    if (!document) continue;
+    const rankedRow: RankedThreadRow = { ...row, ...document, rank: 0 };
+    const details = analyzeMatch(
+      rankedRow,
+      query,
       terms,
-      details,
-      project.ranking,
+      contentMatches.get(row.id),
     );
+    const result = toSearchResult(rankedRow, details, project.ranking);
     result.projectMatch = {
       kind: project.kind,
       projectName: row.project_name,

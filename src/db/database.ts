@@ -2,6 +2,16 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
+export type DatabaseTimingPhase =
+  | "sqlite-open"
+  | "sqlite-setup"
+  | "migration-check";
+
+export type DatabaseOptions = {
+  readOnly?: boolean;
+  timing?: (phase: DatabaseTimingPhase, durationMs: number) => void;
+};
+
 const MIGRATIONS = [
   {
     version: 1,
@@ -46,14 +56,30 @@ type SourceRow = {
 export class WorktrailDatabase {
   readonly raw: DatabaseSync;
 
-  constructor(path: string) {
+  constructor(path: string, options: DatabaseOptions = {}) {
     const resolved = resolve(path);
-    mkdirSync(dirname(resolved), { recursive: true });
-    this.raw = new DatabaseSync(resolved);
-    this.raw.exec("PRAGMA journal_mode = WAL");
+    if (!options.readOnly) mkdirSync(dirname(resolved), { recursive: true });
+    const openStartedAt = performance.now();
+    this.raw = options.readOnly
+      ? new DatabaseSync(resolved, { readOnly: true })
+      : new DatabaseSync(resolved);
+    options.timing?.("sqlite-open", performance.now() - openStartedAt);
+
+    const setupStartedAt = performance.now();
+    if (options.readOnly) this.raw.exec("PRAGMA query_only = ON");
+    else this.raw.exec("PRAGMA journal_mode = WAL");
     this.raw.exec("PRAGMA foreign_keys = ON");
     this.raw.exec("PRAGMA busy_timeout = 5000");
-    this.migrate();
+    options.timing?.("sqlite-setup", performance.now() - setupStartedAt);
+
+    if (!options.readOnly) {
+      const migrationStartedAt = performance.now();
+      this.migrate();
+      options.timing?.(
+        "migration-check",
+        performance.now() - migrationStartedAt,
+      );
+    }
   }
 
   close(): void {

@@ -8,7 +8,7 @@ import {
   type LaunchProps,
   openCommandPreferences,
 } from "@raycast/api";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   debugCommandFromError,
@@ -22,13 +22,17 @@ import {
   sanitizeDisplayText,
   targetActions,
 } from "./display.js";
+import {
+  SearchRequestCoordinator,
+  type SearchRequest,
+} from "./search-session.js";
 import type {
   ResumableTarget,
   ResumeSearchResult,
   WorktrailPreferences,
 } from "./types.js";
 
-const SEARCH_DEBOUNCE_MS = 250;
+const SEARCH_DEBOUNCE_MS = 120;
 
 type ViewState =
   | { status: "idle" }
@@ -53,6 +57,7 @@ export default function ResumeWorktrail(
   const [searchText, setSearchText] = useState(props.arguments.query ?? "");
   const [state, setState] = useState<ViewState>({ status: "idle" });
   const [isShowingDetail, setIsShowingDetail] = useState(false);
+  const requestCoordinator = useRef(new SearchRequestCoordinator()).current;
   const query = searchText.trim();
 
   useEffect(() => {
@@ -61,9 +66,11 @@ export default function ResumeWorktrail(
       return;
     }
 
-    const controller = new AbortController();
-    setState({ status: "loading" });
+    setState({ status: "idle" });
+    let request: SearchRequest | undefined;
     const timeout = setTimeout(() => {
+      request = requestCoordinator.begin();
+      setState({ status: "loading" });
       void searchWorktrail(
         query,
         {
@@ -74,14 +81,13 @@ export default function ResumeWorktrail(
           worktrailProjectPath,
           worktrailPath,
         },
-        controller.signal,
+        request.signal,
       )
         .then((result) => {
-          if (!controller.signal.aborted)
-            setState({ status: "success", result });
+          if (request?.isCurrent()) setState({ status: "success", result });
         })
         .catch((error: unknown) => {
-          if (controller.signal.aborted) return;
+          if (!request?.isCurrent()) return;
           const debugCommand = debugCommandFromError(error);
           setState({
             status: "error",
@@ -97,19 +103,25 @@ export default function ResumeWorktrail(
 
     return () => {
       clearTimeout(timeout);
-      controller.abort();
+      request?.cancel();
     };
   }, [
     databasePath,
     includeArchived,
     pnpmPath,
     query,
+    requestCoordinator,
     resultLimit,
     worktrailProjectPath,
     worktrailPath,
   ]);
 
-  const result = state.status === "success" ? state.result : undefined;
+  const result =
+    state.status === "success" && state.result.query === query
+      ? state.result
+      : undefined;
+  const visibleState: ViewState =
+    state.status === "success" && !result ? { status: "idle" } : state;
   const targets = result?.targets ?? [];
   const diagnostics = diagnosticMessages(result?.diagnostics ?? []);
 
@@ -143,7 +155,7 @@ export default function ResumeWorktrail(
           ))}
         </List.Section>
       ) : (
-        <EmptyState query={query} state={state} />
+        <EmptyState query={query} state={visibleState} />
       )}
     </List>
   );

@@ -93,23 +93,61 @@ async function main(): Promise<void> {
 }
 
 function runResume(args: ParsedArgs): void {
+  const startedAt = performance.now();
   const query = args.positional.join(" ").trim();
   if (!query) throw new Error("Resume requires a query.");
-  const database = new WorktrailDatabase(databasePath(args, false));
+  const timingEnabled =
+    args.flags.has("debug-timing") || process.env.WORKTRAIL_TIMING === "1";
+  const phases = new Map<string, number>();
+  const recordTiming = (phase: string, durationMs: number) => {
+    if (!timingEnabled) return;
+    phases.set(phase, (phases.get(phase) ?? 0) + durationMs);
+  };
+  const database = new WorktrailDatabase(databasePath(args, false), {
+    readOnly: true,
+    timing: recordTiming,
+  });
   try {
+    const searchStartedAt = performance.now();
     const result = findResumableTargets(database, {
       query,
       limit: numberFlag(args, "limit") ?? 5,
       includeArchived: args.flags.has("include-archived"),
+      ...(timingEnabled ? { timing: recordTiming } : {}),
     });
-    console.log(
-      args.flags.has("json")
-        ? JSON.stringify(result, null, 2)
-        : formatHumanResume(result),
+    recordTiming("search-ranking", performance.now() - searchStartedAt);
+    const serializationStartedAt = performance.now();
+    const output = args.flags.has("json")
+      ? JSON.stringify(result, null, 2)
+      : formatHumanResume(result);
+    recordTiming(
+      "output-serialization",
+      performance.now() - serializationStartedAt,
     );
+    console.log(output);
   } finally {
+    const closeStartedAt = performance.now();
     database.close();
+    recordTiming("sqlite-close", performance.now() - closeStartedAt);
+    if (timingEnabled) {
+      const timing = {
+        version: 1,
+        command: "resume",
+        durationMs: roundedMilliseconds(performance.now() - startedAt),
+        phases: Object.fromEntries(
+          [...phases.entries()].map(([phase, durationMs]) => [
+            phase,
+            roundedMilliseconds(durationMs),
+          ]),
+        ),
+      };
+      process.stderr.write(`[worktrail timing] ${JSON.stringify(timing)}\n`);
+    }
   }
+}
+
+function roundedMilliseconds(value: number): number {
+  return Number(value.toFixed(3));
 }
 
 export function formatHumanResume(result: ResumeSearchResult): string {
@@ -788,7 +826,7 @@ Usage:
   worktrail index --fixtures [--db PATH] [--force]
   worktrail index [--db PATH] [--codex-home PATH] [--max-sources N] [--since ISO_DATE]
   worktrail search "query" [--db PATH] [--limit N] [--json] [--include-ignored]
-  worktrail resume "query" [--db PATH] [--limit N] [--json] [--include-archived]
+  worktrail resume "query" [--db PATH] [--limit N] [--json] [--include-archived] [--debug-timing]
   worktrail state "query" [--db PATH] [--limit N] [--json] [--explain]
   worktrail report --since ISO_INSTANT [--until ISO_INSTANT] [--timezone TIMEZONE] [--db PATH] [--json]
   worktrail workstreams list [--db PATH] [--json]

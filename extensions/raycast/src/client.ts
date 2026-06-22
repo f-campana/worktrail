@@ -70,9 +70,41 @@ class WorktrailSpawnError extends Error {
 type SearchDependencies = {
   execute?: typeof execute;
   homeDirectory?: string;
+  cache?: ResumeSearchCache;
   resolvePnpmExecutable?: typeof resolvePnpmExecutable;
   resolveWorktrailExecutable?: typeof resolveWorktrailExecutable;
 };
+
+export type ResumeSearchCache = {
+  get(key: string): ResumeSearchResult | undefined;
+  set(key: string, result: ResumeSearchResult): void;
+};
+
+export function createResumeSearchCache(
+  ttlMs = 45_000,
+  now: () => number = Date.now,
+): ResumeSearchCache {
+  const entries = new Map<
+    string,
+    { expiresAt: number; result: ResumeSearchResult }
+  >();
+  return {
+    get(key) {
+      const entry = entries.get(key);
+      if (!entry) return undefined;
+      if (entry.expiresAt <= now()) {
+        entries.delete(key);
+        return undefined;
+      }
+      return entry.result;
+    },
+    set(key, result) {
+      entries.set(key, { expiresAt: now() + ttlMs, result });
+    },
+  };
+}
+
+const sessionSearchCache = createResumeSearchCache();
 
 export function buildInstalledWorktrailInvocation(
   query: string,
@@ -125,6 +157,14 @@ export async function searchWorktrail(
   signal?: AbortSignal,
   dependencies: SearchDependencies = {},
 ): Promise<ResumeSearchResult> {
+  if (signal?.aborted) throw abortError();
+  const cache =
+    dependencies.cache ??
+    (Object.keys(dependencies).length === 0 ? sessionSearchCache : undefined);
+  const cacheKey = resumeSearchCacheKey(query, preferences);
+  const cached = cache?.get(cacheKey);
+  if (cached) return cached;
+
   const homeDirectory = dependencies.homeDirectory ?? homedir();
   const databasePath = await resolveOptionalDatabasePath(
     preferences.databasePath,
@@ -205,7 +245,10 @@ export async function searchWorktrail(
     );
   }
   try {
-    return parseResumeSearchResult(parsed);
+    const result = parseResumeSearchResult(parsed);
+    if (signal?.aborted) throw abortError();
+    cache?.set(cacheKey, result);
+    return result;
   } catch (error) {
     if (error instanceof ResumeCompatibilityError) {
       throw new WorktrailResponseError(
@@ -219,6 +262,27 @@ export async function searchWorktrail(
     }
     throw error;
   }
+}
+
+export function resumeSearchCacheKey(
+  query: string,
+  preferences: WorktrailPreferences,
+): string {
+  return JSON.stringify([
+    query,
+    preferences.resultLimit,
+    preferences.includeArchived,
+    preferences.databasePath?.trim() ?? "",
+    preferences.worktrailPath?.trim() ?? "",
+    preferences.worktrailProjectPath?.trim() ?? "",
+    preferences.pnpmPath?.trim() ?? "",
+  ]);
+}
+
+function abortError(): Error {
+  return Object.assign(new Error("Worktrail search aborted."), {
+    code: "ABORT_ERR",
+  });
 }
 
 function execute(

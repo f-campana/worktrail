@@ -1,5 +1,10 @@
 import type { WorktrailDatabase } from "./db/database.js";
-import { queryTerms, searchThreads, type SearchResult } from "./search.js";
+import {
+  queryTerms,
+  searchThreads,
+  type SearchResult,
+  type SearchTimingPhase,
+} from "./search.js";
 
 export const RESUME_SEARCH_SCHEMA_VERSION = 1 as const;
 export const RESUME_SCORE_VERSION = 3 as const;
@@ -62,6 +67,7 @@ export type ResumeSearchOptions = {
   limit?: number;
   includeArchived?: boolean;
   clock?: () => Date;
+  timing?: (phase: SearchTimingPhase, durationMs: number) => void;
 };
 
 type Assignment = { workstreamId: string; name: string; aliasMatch?: string };
@@ -75,11 +81,68 @@ export function findResumableTargets(
   if (queryTerms(query).length === 0)
     throw new Error("Resume requires a query.");
   const limit = Math.max(1, Math.min(options.limit ?? 5, 20));
-  const diagnostics: ResumeDiagnostic[] = [];
-  const matches = searchThreads(database, query, 20).filter(
+  const assignments = loadAssignments(database);
+  const baseSearchOptions = options.timing ? { timing: options.timing } : {};
+  const fastSearchOptions = {
+    ...baseSearchOptions,
+    rankingLimit: limit,
+    detailLimit: limit,
+    selectionExcludeArchived: !options.includeArchived,
+    selectionTieBreakByTitle: true,
+  };
+  let matches = searchThreads(database, query, 20, fastSearchOptions).filter(
     (match) => options.includeArchived || !match.archived,
   );
-  const assignments = loadAssignments(database);
+  let diagnostics: ResumeDiagnostic[] = [];
+  let targets = buildTargets(
+    database,
+    matches,
+    assignments,
+    query,
+    options,
+    diagnostics,
+  );
+
+  if (limit < 20 && targets.size < limit && matches.length >= limit) {
+    matches = searchThreads(database, query, 20, baseSearchOptions).filter(
+      (match) => options.includeArchived || !match.archived,
+    );
+    diagnostics = [];
+    targets = buildTargets(
+      database,
+      matches,
+      assignments,
+      query,
+      options,
+      diagnostics,
+    );
+  }
+
+  return {
+    schemaVersion: RESUME_SEARCH_SCHEMA_VERSION,
+    query,
+    generatedAt: (options.clock ?? (() => new Date()))().toISOString(),
+    limit,
+    targets: [...targets.values()]
+      .sort(
+        (left, right) =>
+          right.score - left.score ||
+          right.lastActivity.localeCompare(left.lastActivity) ||
+          left.title.localeCompare(right.title),
+      )
+      .slice(0, limit),
+    diagnostics,
+  };
+}
+
+function buildTargets(
+  database: WorktrailDatabase,
+  matches: SearchResult[],
+  assignments: Map<string, Assignment>,
+  query: string,
+  options: ResumeSearchOptions,
+  diagnostics: ResumeDiagnostic[],
+): Map<string, ResumableTarget> {
   const targets = new Map<string, ResumableTarget>();
 
   for (const match of matches) {
@@ -113,22 +176,7 @@ export function findResumableTargets(
       if (target.relatedRuns.length > 0) targets.set(key, target);
     }
   }
-
-  return {
-    schemaVersion: RESUME_SEARCH_SCHEMA_VERSION,
-    query,
-    generatedAt: (options.clock ?? (() => new Date()))().toISOString(),
-    limit,
-    targets: [...targets.values()]
-      .sort(
-        (left, right) =>
-          right.score - left.score ||
-          right.lastActivity.localeCompare(left.lastActivity) ||
-          left.title.localeCompare(right.title),
-      )
-      .slice(0, limit),
-    diagnostics,
-  };
+  return targets;
 }
 
 function runTarget(
@@ -169,10 +217,11 @@ function workstreamTarget(
   const runs = loadWorkstreamRuns(database, assignment.workstreamId).filter(
     (run) => options.includeArchived || !run.archived,
   );
+  const searchOptions = options.timing ? { timing: options.timing } : {};
   const best = runs
     .map((run) => ({
       run,
-      result: searchThreads(database, query, 20).find(
+      result: searchThreads(database, query, 20, searchOptions).find(
         (item) => item.externalId === run.externalId,
       ),
     }))

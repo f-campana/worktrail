@@ -7,8 +7,10 @@ import test, { type TestContext } from "node:test";
 import {
   buildInstalledWorktrailInvocation,
   buildPnpmWorktrailInvocation,
+  createResumeSearchCache,
   debugCommandFromError,
   formatDebugCommand,
+  resumeSearchCacheKey,
   sanitizeErrorMessage,
   searchWorktrail,
 } from "../src/client.js";
@@ -40,6 +42,7 @@ import {
   resolveWorktrailExecutable,
   WorktrailResolutionError,
 } from "../src/worktrail.js";
+import { SearchRequestCoordinator } from "../src/search-session.js";
 
 const target: ResumableTarget = {
   kind: "run",
@@ -534,6 +537,63 @@ test("search uses the bare Worktrail PATH fallback", async () => {
   );
 
   assert.equal(program, "worktrail");
+});
+
+test("session cache is keyed by exact query and search preferences", async () => {
+  let now = 1_000;
+  let executions = 0;
+  const cache = createResumeSearchCache(45_000, () => now);
+  const preferences = {
+    resultLimit: "5",
+    includeArchived: false,
+  };
+  const dependencies = {
+    cache,
+    homeDirectory: "/Users/example",
+    resolveWorktrailExecutable: async () => "/usr/local/bin/worktrail",
+    execute: async () => {
+      executions += 1;
+      return JSON.stringify(response({ query: "profile" }));
+    },
+  };
+
+  await searchWorktrail("profile", preferences, undefined, dependencies);
+  await searchWorktrail("profile", preferences, undefined, dependencies);
+  assert.equal(executions, 1);
+
+  await searchWorktrail(
+    "profile",
+    { ...preferences, includeArchived: true },
+    undefined,
+    dependencies,
+  );
+  assert.equal(executions, 2);
+  assert.notEqual(
+    resumeSearchCacheKey("profile", preferences),
+    resumeSearchCacheKey("profile", {
+      ...preferences,
+      includeArchived: true,
+    }),
+  );
+
+  now += 45_001;
+  await searchWorktrail("profile", preferences, undefined, dependencies);
+  assert.equal(executions, 3);
+});
+
+test("new interactive searches cancel and invalidate stale requests", () => {
+  const coordinator = new SearchRequestCoordinator();
+  const stale = coordinator.begin();
+  const current = coordinator.begin();
+
+  assert.equal(stale.signal.aborted, true);
+  assert.equal(stale.isCurrent(), false);
+  assert.equal(current.signal.aborted, false);
+  assert.equal(current.isCurrent(), true);
+
+  current.cancel();
+  assert.equal(current.signal.aborted, true);
+  assert.equal(current.isCurrent(), false);
 });
 
 test("reports a missing Worktrail executable when no development fallback is configured", async () => {
