@@ -86,6 +86,23 @@ export type ThreadEnrichment = {
   archived?: boolean;
 };
 
+export type SourceThreadState = "active" | "archived" | "missing" | "unknown";
+
+export type SourceThreadStateRequest = {
+  sourceId: string;
+  resumeRef: string;
+  sourceTool?: string;
+  sourceUri?: string;
+};
+
+export type SourceThreadStateObservation = {
+  sourceId: string;
+  resumeRef: string;
+  state: SourceThreadState;
+  observedAt: string;
+  sourceTool: "codex-local";
+};
+
 export interface SourceAdapter {
   readonly id: string;
   discover(options?: DiscoveryOptions): AsyncIterable<DiscoveredSource>;

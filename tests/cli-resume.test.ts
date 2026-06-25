@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
 import { WorktrailDatabase } from "../src/db/database.js";
@@ -112,6 +112,82 @@ test("read-only resume skips migration and write setup", async () => {
     );
   } finally {
     readOnly.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("target validate CLI returns clean JSON without opening Codex", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "worktrail-target-cli-"));
+  const dbPath = join(directory, "worktrail.db");
+  const codexHome = join(directory, "codex");
+  const database = new WorktrailDatabase(dbPath);
+  const id = syntheticId(303);
+  const rolloutPath = join(
+    codexHome,
+    "sessions",
+    "2026",
+    "06",
+    "20",
+    `rollout-2026-06-20T12-00-00-${id}.jsonl`,
+  );
+  try {
+    await mkdir(dirname(rolloutPath), { recursive: true });
+    await writeFile(rolloutPath, "{}\n", "utf8");
+    insertSyntheticThread(database, {
+      externalId: id,
+      title: "Validate CLI",
+      cwd: "/repo",
+      updatedAt: "2026-06-20T10:00:00.000Z",
+      evidence: ["validate cli"],
+      files: [],
+    });
+    database.raw
+      .prepare("UPDATE sources SET source_uri = ? WHERE external_id = ?")
+      .run(rolloutPath, id);
+    database.close();
+
+    const openable = spawnSync(
+      cli,
+      [
+        "src/cli.ts",
+        "target",
+        "validate",
+        id,
+        "--db",
+        dbPath,
+        "--codex-home",
+        codexHome,
+        "--json",
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(openable.status, 0, openable.stderr);
+    assert.deepEqual(JSON.parse(openable.stdout), {
+      schemaVersion: 1,
+      resumeRef: id,
+      status: "openable",
+      openUrl: `codex://threads/${id}`,
+    });
+
+    const invalid = spawnSync(
+      cli,
+      [
+        "src/cli.ts",
+        "target",
+        "validate",
+        "unsafe; echo nope",
+        "--db",
+        dbPath,
+        "--json",
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(invalid.status, 0, invalid.stderr);
+    assert.equal(JSON.parse(invalid.stdout).status, "invalid");
+  } finally {
+    try {
+      database.close();
+    } catch {}
     await rm(directory, { recursive: true, force: true });
   }
 });

@@ -2,10 +2,10 @@
 
 This private Raycast extension provides one command, **Resume Worktrail**. It
 searches Worktrail's versioned Fast Resume JSON contract and opens exact local
-Codex threads when Worktrail declares a verified deep link. Copying an inert
-Codex resume command remains the secondary fallback. Raycast is only a client:
-ranking, confidence, signals, archive filtering, and action construction remain
-owned by Worktrail.
+Codex threads only after Worktrail validates the selected target. Copying an
+inert Codex resume command remains the secondary fallback. Raycast is only a
+client: ranking, confidence, signals, archive filtering, source-state
+validation, and action construction remain owned by Worktrail.
 
 ## Requirements
 
@@ -93,6 +93,17 @@ contains only the JSON contract. The extension adds `--db <database-path>` and
 `ResumeSearchResult` schema version 1 and rejects unknown schema versions
 instead of guessing.
 
+On Enter, the primary action invokes the same Worktrail executable with:
+
+```text
+worktrail target validate <SESSION_ID> --json
+```
+
+Raycast opens Codex only when that validation response is schema version 1,
+`status: "openable"`, and the returned URL exactly matches the selected
+`codex://threads/<SESSION_ID>` action. Archived, missing, unknown, invalid, or
+mismatched validation responses show a toast and do not open Codex.
+
 The child receives the resolved home directory and a deterministic executable
 path containing the selected executable directory, Node, Raycast's inherited
 entries, and standard macOS system directories. No shell is invoked, so the
@@ -119,17 +130,24 @@ The error action **Copy Debug Command** copies the shell-safe equivalent for a
 manual Terminal comparison. JSON parse, schema/version, timeout, preference,
 spawn, and unknown failures are classified separately.
 
-The primary action opens `codex://threads/<SESSION_ID>` when Worktrail declares
-that exact-thread action. The extension accepts only a UUID-shaped Codex thread
-URL matching the selected target's resume reference. The secondary action
-copies `codex resume <SESSION_ID>`; other actions can copy a declared ID, the
-resume UUID, or the target title. Opening the thread does not submit a prompt or
-start agent work. The extension never runs Codex CLI, opens Terminal, mutates
-Worktrail, or reimplements ranking.
+The primary action validates and then opens `codex://threads/<SESSION_ID>` when
+Worktrail declares that exact-thread action. The extension accepts only a
+UUID-shaped Codex thread URL matching the selected target's resume reference.
+The secondary action copies `codex resume <SESSION_ID>`; other actions can copy
+a declared ID, the resume UUID, or the target title. Opening the thread does not
+submit a prompt or start agent work. The extension never runs Codex CLI, opens
+Terminal, mutates Worktrail, reads Codex files, reads SQLite, or reimplements
+ranking.
 
 Archived runs are hidden by default. When **Include archived runs** is enabled,
 Worktrail ranks them lower and Raycast labels them `Archived`. Ignored Worktrail
 runs remain excluded independently of this preference.
+
+The extension uses a short exact-query cache for responsiveness. Cached results
+may render immediately, then Raycast runs a background refresh and replaces the
+list with current Worktrail output. If click-time validation reports archived or
+missing state, Raycast invalidates that cached query and refreshes the current
+results. Cached stale results therefore cannot open blindly.
 
 ## Troubleshooting
 
@@ -235,6 +253,8 @@ or resume-command construction.
   diffs, or remote credential material.
 - Clipboard actions copy only values already declared by Worktrail plus the
   target's resume UUID/title. Copying is always user initiated.
+- The open action is also user initiated and is guarded by Worktrail
+  `target validate`; Raycast never constructs arbitrary Codex deep links.
 
 ## Development and validation
 

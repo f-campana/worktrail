@@ -6,15 +6,19 @@ import test, { type TestContext } from "node:test";
 
 import {
   buildInstalledWorktrailInvocation,
+  buildInstalledTargetValidationInvocation,
   buildPnpmWorktrailInvocation,
+  buildPnpmTargetValidationInvocation,
   createResumeSearchCache,
   debugCommandFromError,
   formatDebugCommand,
   resumeSearchCacheKey,
   sanitizeErrorMessage,
   searchWorktrail,
+  validateWorktrailTarget,
 } from "../src/client.js";
 import {
+  parseTargetValidationResult,
   parseResumeSearchResult,
   ResumeCompatibilityError,
 } from "../src/contract.js";
@@ -146,6 +150,32 @@ test("parses a valid ResumeSearchResult v1", () => {
       response({ targets: [{ ...target, scoreVersion: 2, archived: true }] }),
     ).targets[0]?.archived,
     true,
+  );
+});
+
+test("parses a valid target validation response v1", () => {
+  assert.deepEqual(
+    parseTargetValidationResult({
+      schemaVersion: 1,
+      resumeRef: target.resumeRef,
+      status: "openable",
+      openUrl: target.openActions[0]?.value,
+    }),
+    {
+      schemaVersion: 1,
+      resumeRef: target.resumeRef,
+      status: "openable",
+      openUrl: target.openActions[0]?.value,
+    },
+  );
+  assert.equal(
+    parseTargetValidationResult({
+      schemaVersion: 1,
+      resumeRef: target.resumeRef,
+      status: "archived",
+      message: "Archived",
+    }).status,
+    "archived",
   );
 });
 
@@ -326,6 +356,49 @@ test("builds an argument-safe pnpm fallback invocation", () => {
     "--db",
     "/tmp/worktrail.db",
     "--include-archived",
+  ]);
+});
+
+test("builds argument-safe target validation invocations", () => {
+  const installed = buildInstalledTargetValidationInvocation(
+    "0197f0de-1111-7000-8000-000000000001; echo nope",
+    {
+      databasePath: "/tmp/worktrail.db",
+      resultLimit: "5",
+      includeArchived: false,
+    },
+    "/Users/example/.local/bin/worktrail",
+  );
+  assert.equal(installed.program, "/Users/example/.local/bin/worktrail");
+  assert.deepEqual(installed.args, [
+    "target",
+    "validate",
+    "0197f0de-1111-7000-8000-000000000001; echo nope",
+    "--json",
+    "--db",
+    "/tmp/worktrail.db",
+  ]);
+
+  const pnpm = buildPnpmTargetValidationInvocation(
+    "0197f0de-1111-7000-8000-000000000001",
+    {
+      worktrailProjectPath: "/tmp/worktrail project",
+      databasePath: "/tmp/worktrail.db",
+      resultLimit: "5",
+      includeArchived: true,
+    },
+  );
+  assert.deepEqual(pnpm.args, [
+    "--silent",
+    "--dir",
+    "/tmp/worktrail project",
+    "worktrail",
+    "target",
+    "validate",
+    "0197f0de-1111-7000-8000-000000000001",
+    "--json",
+    "--db",
+    "/tmp/worktrail.db",
   ]);
 });
 
@@ -517,6 +590,53 @@ test("configured Worktrail executable wins without resolving the development fal
   });
 });
 
+test("validates a target through Worktrail before opening", async () => {
+  let pnpmResolutionCalls = 0;
+  let execution: { program: string; args: string[]; cwd: string } | undefined;
+  const result = await validateWorktrailTarget(
+    target.resumeRef!,
+    {
+      worktrailPath: "~/.local/bin/worktrail",
+      worktrailProjectPath: "~/missing-project",
+      pnpmPath: "/missing/pnpm",
+      resultLimit: "10",
+      includeArchived: true,
+    },
+    undefined,
+    {
+      homeDirectory: "/Users/example",
+      resolveWorktrailExecutable: async () =>
+        "/Users/example/.local/bin/worktrail",
+      resolvePnpmExecutable: async () => {
+        pnpmResolutionCalls += 1;
+        return "/missing/pnpm";
+      },
+      execute: async (program, args, cwd) => {
+        execution = { program, args, cwd };
+        return JSON.stringify({
+          schemaVersion: 1,
+          resumeRef: target.resumeRef,
+          status: "openable",
+          openUrl: target.openActions[0]?.value,
+        });
+      },
+    },
+  );
+
+  assert.equal(pnpmResolutionCalls, 0);
+  assert.deepEqual(result, {
+    schemaVersion: 1,
+    resumeRef: target.resumeRef,
+    status: "openable",
+    openUrl: target.openActions[0]?.value,
+  });
+  assert.deepEqual(execution, {
+    program: "/Users/example/.local/bin/worktrail",
+    args: ["target", "validate", target.resumeRef, "--json"],
+    cwd: "/Users/example",
+  });
+});
+
 test("search uses the bare Worktrail PATH fallback", async () => {
   let program = "";
   await searchWorktrail(
@@ -560,6 +680,9 @@ test("session cache is keyed by exact query and search preferences", async () =>
   await searchWorktrail("profile", preferences, undefined, dependencies);
   await searchWorktrail("profile", preferences, undefined, dependencies);
   assert.equal(executions, 1);
+  cache.delete(resumeSearchCacheKey("profile", preferences));
+  await searchWorktrail("profile", preferences, undefined, dependencies);
+  assert.equal(executions, 2);
 
   await searchWorktrail(
     "profile",
@@ -567,7 +690,7 @@ test("session cache is keyed by exact query and search preferences", async () =>
     undefined,
     dependencies,
   );
-  assert.equal(executions, 2);
+  assert.equal(executions, 3);
   assert.notEqual(
     resumeSearchCacheKey("profile", preferences),
     resumeSearchCacheKey("profile", {
@@ -578,7 +701,7 @@ test("session cache is keyed by exact query and search preferences", async () =>
 
   now += 45_001;
   await searchWorktrail("profile", preferences, undefined, dependencies);
-  assert.equal(executions, 3);
+  assert.equal(executions, 4);
 });
 
 test("new interactive searches cancel and invalidate stale requests", () => {

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
 import { open, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 import { TEXT_LIMITS } from "../limits.js";
@@ -14,6 +14,9 @@ import type {
   NormalizedSourceEvent,
   SourceAdapter,
   SourceCursor,
+  SourceThreadState,
+  SourceThreadStateObservation,
+  SourceThreadStateRequest,
   ThreadEnrichment,
 } from "../types.js";
 
@@ -43,6 +46,8 @@ const KNOWN_OUTER_RECORDS = new Set([
 ]);
 
 const MESSAGE_ROLES = new Set(["user", "assistant", "system", "developer"]);
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class CodexLocalAdapter implements SourceAdapter {
   readonly id = "codex-local";
@@ -196,6 +201,130 @@ export class CodexLocalAdapter implements SourceAdapter {
     }
 
     return [...newest.values()];
+  }
+
+  checkThreadStates(
+    requests: readonly SourceThreadStateRequest[],
+    options: { clock?: () => Date } = {},
+  ): SourceThreadStateObservation[] {
+    const observedAt = (options.clock ?? (() => new Date()))().toISOString();
+    let scannedIndex:
+      | Map<string, Exclude<SourceThreadState, "missing" | "unknown">>
+      | undefined;
+    const scanState = (resumeRef: string): SourceThreadState => {
+      if (!this.hasKnownStateLayout()) return "unknown";
+      scannedIndex ??= this.scanThreadStateIndex();
+      return scannedIndex.get(resumeRef) ?? "missing";
+    };
+
+    return requests.map((request) => ({
+      sourceId: request.sourceId,
+      resumeRef: request.resumeRef,
+      state: this.threadState(request, scanState),
+      observedAt,
+      sourceTool: this.id,
+    }));
+  }
+
+  private threadState(
+    request: SourceThreadStateRequest,
+    scanState: (resumeRef: string) => SourceThreadState,
+  ): SourceThreadState {
+    if (!UUID_PATTERN.test(request.resumeRef)) return "unknown";
+    if (request.sourceTool && request.sourceTool !== this.id) return "unknown";
+
+    if (request.sourceUri) {
+      const sourceUri = resolve(request.sourceUri);
+      const knownPath = this.knownSourcePath(sourceUri);
+      if (!knownPath) return "unknown";
+
+      const direct = existingPathState(sourceUri, knownPath);
+      if (direct) return direct;
+
+      for (const candidate of this.candidatePaths(sourceUri)) {
+        const candidateKind = this.knownSourcePath(candidate);
+        if (!candidateKind) continue;
+        const state = existingPathState(candidate, candidateKind);
+        if (state) return state;
+      }
+    }
+
+    return scanState(request.resumeRef);
+  }
+
+  private candidatePaths(sourceUri: string): string[] {
+    const filename = basename(sourceUri);
+    const candidates = new Set<string>();
+    const activeRoot = join(this.codexHome, "sessions");
+    const archivedRoot = join(this.codexHome, "archived_sessions");
+    const activeRelative = safeRelative(activeRoot, sourceUri);
+    const archivedRelative = safeRelative(archivedRoot, sourceUri);
+    const datePath = rolloutDatePath(filename);
+
+    if (datePath) candidates.add(join(activeRoot, datePath, filename));
+    if (activeRelative) candidates.add(join(archivedRoot, activeRelative));
+    if (archivedRelative) candidates.add(join(activeRoot, archivedRelative));
+    candidates.add(join(activeRoot, filename));
+    candidates.add(join(archivedRoot, filename));
+
+    return [...candidates];
+  }
+
+  private knownSourcePath(
+    path: string,
+  ): "active" | "archived" | "fixture" | undefined {
+    const resolved = resolve(path);
+    if (this.fixtureDir && pathIsInside(this.fixtureDir, resolved)) {
+      return "fixture";
+    }
+    if (pathIsInside(join(this.codexHome, "sessions"), resolved)) {
+      return "active";
+    }
+    if (pathIsInside(join(this.codexHome, "archived_sessions"), resolved)) {
+      return "archived";
+    }
+    return undefined;
+  }
+
+  private hasKnownStateLayout(): boolean {
+    return (
+      Boolean(this.fixtureDir && existsSync(this.fixtureDir)) ||
+      existsSync(join(this.codexHome, "sessions")) ||
+      existsSync(join(this.codexHome, "archived_sessions"))
+    );
+  }
+
+  private scanThreadStateIndex(): Map<
+    string,
+    Exclude<SourceThreadState, "missing" | "unknown">
+  > {
+    const states = new Map<
+      string,
+      Exclude<SourceThreadState, "missing" | "unknown">
+    >();
+    if (this.fixtureDir) {
+      for (const path of collectJsonlSync(this.fixtureDir)) {
+        const id = sessionIdFromFilename(path);
+        if (id)
+          states.set(
+            id,
+            basename(path).includes("legacy") ? "archived" : "active",
+          );
+      }
+      return states;
+    }
+
+    for (const path of collectJsonlSync(join(this.codexHome, "sessions"))) {
+      const id = sessionIdFromFilename(path);
+      if (id) states.set(id, "active");
+    }
+    for (const path of collectJsonlSync(
+      join(this.codexHome, "archived_sessions"),
+    )) {
+      const id = sessionIdFromFilename(path);
+      if (id && !states.has(id)) states.set(id, "archived");
+    }
+    return states;
   }
 
   private *parseLine(
@@ -553,6 +682,26 @@ async function collectJsonl(root: string): Promise<string[]> {
   return output;
 }
 
+function collectJsonlSync(root: string): string[] {
+  const output: string[] = [];
+  let entries;
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return output;
+  }
+
+  for (const entry of entries) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) {
+      output.push(...collectJsonlSync(path));
+    } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+      output.push(path);
+    }
+  }
+  return output;
+}
+
 async function hasTrailingNewline(path: string): Promise<boolean> {
   let handle;
   try {
@@ -573,6 +722,43 @@ function sessionIdFromFilename(path: string): string | undefined {
   return basename(path).match(
     /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i,
   )?.[1];
+}
+
+function existingPathState(
+  path: string,
+  kind: "active" | "archived" | "fixture",
+): SourceThreadState | undefined {
+  try {
+    if (!statSync(path).isFile()) return undefined;
+  } catch {
+    return undefined;
+  }
+  if (kind === "fixture") {
+    return basename(path).includes("legacy") ? "archived" : "active";
+  }
+  return kind;
+}
+
+function safeRelative(root: string, path: string): string | undefined {
+  const resolvedRoot = resolve(root);
+  const resolvedPath = resolve(path);
+  if (!pathIsInside(resolvedRoot, resolvedPath)) return undefined;
+  return relative(resolvedRoot, resolvedPath);
+}
+
+function pathIsInside(root: string, path: string): boolean {
+  const resolvedRoot = resolve(root);
+  const resolvedPath = resolve(path);
+  return (
+    resolvedPath === resolvedRoot || resolvedPath.startsWith(`${resolvedRoot}/`)
+  );
+}
+
+function rolloutDatePath(filename: string): string | undefined {
+  const match = filename.match(/^rollout-(\d{4})-(\d{2})-(\d{2})T/u);
+  if (!match) return undefined;
+  const [, year, month, day] = match;
+  return year && month && day ? join(year, month, day) : undefined;
 }
 
 function stringValue(value: unknown): string | undefined {

@@ -5,15 +5,21 @@ import {
   getPreferenceValues,
   Icon,
   List,
+  Toast,
   type LaunchProps,
+  open,
   openCommandPreferences,
+  showToast,
 } from "@raycast/api";
 import { useEffect, useRef, useState } from "react";
 
 import {
+  cachedResumeSearchResult,
   debugCommandFromError,
+  invalidateResumeSearchCache,
   sanitizeErrorMessage,
   searchWorktrail,
+  validateWorktrailTarget,
 } from "./client.js";
 import {
   buildTargetDetailMarkdown,
@@ -57,8 +63,17 @@ export default function ResumeWorktrail(
   const [searchText, setSearchText] = useState(props.arguments.query ?? "");
   const [state, setState] = useState<ViewState>({ status: "idle" });
   const [isShowingDetail, setIsShowingDetail] = useState(false);
+  const [refreshToken, setRefreshToken] = useState(0);
   const requestCoordinator = useRef(new SearchRequestCoordinator()).current;
   const query = searchText.trim();
+  const searchPreferences = {
+    databasePath,
+    includeArchived,
+    pnpmPath,
+    resultLimit,
+    worktrailProjectPath,
+    worktrailPath,
+  };
 
   useEffect(() => {
     if (!query) {
@@ -70,19 +85,12 @@ export default function ResumeWorktrail(
     let request: SearchRequest | undefined;
     const timeout = setTimeout(() => {
       request = requestCoordinator.begin();
-      setState({ status: "loading" });
-      void searchWorktrail(
-        query,
-        {
-          databasePath,
-          includeArchived,
-          pnpmPath,
-          resultLimit,
-          worktrailProjectPath,
-          worktrailPath,
-        },
-        request.signal,
-      )
+      const cached = cachedResumeSearchResult(query, searchPreferences);
+      if (cached) setState({ status: "success", result: cached });
+      else setState({ status: "loading" });
+      void searchWorktrail(query, searchPreferences, request.signal, {
+        bypassCache: true,
+      })
         .then((result) => {
           if (request?.isCurrent()) setState({ status: "success", result });
         })
@@ -110,6 +118,7 @@ export default function ResumeWorktrail(
     includeArchived,
     pnpmPath,
     query,
+    refreshToken,
     requestCoordinator,
     resultLimit,
     worktrailProjectPath,
@@ -150,6 +159,9 @@ export default function ResumeWorktrail(
               diagnostics={diagnostics}
               isShowingDetail={isShowingDetail}
               onToggleDetail={() => setIsShowingDetail((visible) => !visible)}
+              onValidationStale={() => setRefreshToken((value) => value + 1)}
+              preferences={searchPreferences}
+              query={query}
               target={target}
             />
           ))}
@@ -217,12 +229,18 @@ function EmptyState({ query, state }: { query: string; state: ViewState }) {
 function TargetItem({
   diagnostics,
   isShowingDetail,
+  onValidationStale,
   onToggleDetail,
+  preferences,
+  query,
   target,
 }: {
   diagnostics: string[];
   isShowingDetail: boolean;
+  onValidationStale: () => void;
   onToggleDetail: () => void;
+  preferences: WorktrailPreferences;
+  query: string;
   target: ResumableTarget;
 }) {
   const display = deriveTargetDisplay(target);
@@ -252,6 +270,10 @@ function TargetItem({
               <DeclaredAction
                 key={`${action.kind}:${action.value}:${index}`}
                 action={action}
+                onValidationStale={onValidationStale}
+                preferences={preferences}
+                query={query}
+                target={target}
               />
             ))}
           </ActionPanel.Section>
@@ -292,14 +314,30 @@ function TargetItem({
 
 function DeclaredAction({
   action,
+  onValidationStale,
+  preferences,
+  query,
+  target,
 }: {
   action: ResumableTarget["openActions"][number];
+  onValidationStale: () => void;
+  preferences: WorktrailPreferences;
+  query: string;
+  target: ResumableTarget;
 }) {
   if (action.kind === "open-codex") {
     return (
-      <Action.Open
+      <Action
         icon={Icon.AppWindow}
-        target={action.value}
+        onAction={() =>
+          void validateAndOpenCodex({
+            action,
+            onValidationStale,
+            preferences,
+            query,
+            target,
+          })
+        }
         title={sanitizeDisplayText(action.label)}
       />
     );
@@ -311,6 +349,85 @@ function DeclaredAction({
       title={sanitizeDisplayText(action.label)}
     />
   );
+}
+
+async function validateAndOpenCodex({
+  action,
+  onValidationStale,
+  preferences,
+  query,
+  target,
+}: {
+  action: ResumableTarget["openActions"][number];
+  onValidationStale: () => void;
+  preferences: WorktrailPreferences;
+  query: string;
+  target: ResumableTarget;
+}) {
+  if (!target.resumeRef) return;
+  await showToast({
+    style: Toast.Style.Animated,
+    title: "Checking Codex thread",
+  });
+  try {
+    const validation = await validateWorktrailTarget(
+      target.resumeRef,
+      preferences,
+    );
+    const openUrl =
+      validation.status === "openable" &&
+      validation.openUrl === action.value &&
+      isDeclaredCodexThreadUrl(validation.openUrl, target.resumeRef)
+        ? validation.openUrl
+        : undefined;
+    if (openUrl) {
+      await open(openUrl);
+      await showToast({ style: Toast.Style.Success, title: "Opening Codex" });
+      return;
+    }
+
+    if (validation.status === "archived" || validation.status === "missing") {
+      invalidateResumeSearchCache(query, preferences);
+      onValidationStale();
+    }
+    await showToast({
+      style: Toast.Style.Failure,
+      title: validationTitle(validation.status),
+      message: validation.message,
+    });
+  } catch (error: unknown) {
+    await showToast({
+      style: Toast.Style.Failure,
+      title: "Worktrail validation failed",
+      message: sanitizeErrorMessage(error, [
+        preferences.worktrailPath ?? "",
+        preferences.worktrailProjectPath ?? "",
+        preferences.databasePath ?? "",
+      ]),
+    });
+  }
+}
+
+function isDeclaredCodexThreadUrl(url: string, resumeRef: string): boolean {
+  return (
+    url === `codex://threads/${resumeRef}` &&
+    /^codex:\/\/threads\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      url,
+    )
+  );
+}
+
+function validationTitle(status: string): string {
+  switch (status) {
+    case "archived":
+      return "Thread is archived";
+    case "missing":
+      return "Thread is unavailable";
+    case "unknown":
+      return "Thread state is unknown";
+    default:
+      return "Cannot open Codex thread";
+  }
 }
 
 function TargetDetail({

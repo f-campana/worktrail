@@ -6,6 +6,7 @@ import {
   type ResumeOpenAction,
   type ResumeSearchResult,
   type ResumeSignal,
+  type TargetValidationResult,
 } from "./types.js";
 
 export class ResumeCompatibilityError extends Error {
@@ -42,6 +43,27 @@ export function parseResumeSearchResult(input: unknown): ResumeSearchResult {
       (diagnostic, index) =>
         parseDiagnostic(diagnostic, `diagnostics[${index}]`),
     ),
+  };
+}
+
+export function parseTargetValidationResult(
+  input: unknown,
+): TargetValidationResult {
+  const value = record(input, "response");
+  if (value.schemaVersion !== SUPPORTED_SCHEMA_VERSION) {
+    throw new ResumeCompatibilityError(value.schemaVersion);
+  }
+
+  return {
+    schemaVersion: SUPPORTED_SCHEMA_VERSION,
+    resumeRef: string(value.resumeRef, "resumeRef"),
+    status: oneOf(
+      value.status,
+      ["openable", "archived", "missing", "unknown", "invalid"] as const,
+      "status",
+    ),
+    ...optionalStringField(value, "openUrl", "response"),
+    ...optionalStringField(value, "message", "response"),
   };
 }
 

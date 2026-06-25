@@ -55,6 +55,21 @@ export type ResumeSearchResult = {
   diagnostics: ResumeDiagnostic[];
 };
 
+export type TargetValidationStatus =
+  | "openable"
+  | "archived"
+  | "missing"
+  | "unknown"
+  | "invalid";
+
+export type TargetValidationResult = {
+  schemaVersion: typeof SUPPORTED_SCHEMA_VERSION;
+  resumeRef: string;
+  status: TargetValidationStatus;
+  openUrl?: string;
+  message?: string;
+};
+
 export type WorktrailPreferences = {
   worktrailPath?: string;
   pnpmPath?: string;

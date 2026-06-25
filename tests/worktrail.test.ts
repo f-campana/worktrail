@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { CodexLocalAdapter } from "../src/adapters/codex-local.js";
@@ -63,6 +63,71 @@ test("title enrichment uses the newest session-index row", async () => {
   assert.equal(enrichments.length, 1);
   assert.equal(enrichments[0]?.title, "Fix widget validation and tests");
   assert.equal(enrichments[0]?.updatedAt, "2026-02-03T11:00:09.000Z");
+});
+
+test("Codex-local source state checker classifies active archived missing and unknown", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "worktrail-source-state-"));
+  const codexHome = join(temporary, "codex");
+  const activeId = "10000000-0000-4000-8000-000000000601";
+  const archivedId = "10000000-0000-4000-8000-000000000602";
+  const missingId = "10000000-0000-4000-8000-000000000603";
+  const activePath = join(
+    codexHome,
+    "sessions",
+    "2026",
+    "06",
+    "20",
+    `rollout-2026-06-20T12-00-00-${activeId}.jsonl`,
+  );
+  const archivedPath = join(
+    codexHome,
+    "archived_sessions",
+    `rollout-2026-06-20T12-00-00-${archivedId}.jsonl`,
+  );
+  const missingPath = join(
+    codexHome,
+    "sessions",
+    "2026",
+    "06",
+    "20",
+    `rollout-2026-06-20T12-00-00-${missingId}.jsonl`,
+  );
+  try {
+    await writeStateRollout(activePath);
+    await writeStateRollout(archivedPath);
+    const adapter = new CodexLocalAdapter({ codexHome });
+    const states = adapter.checkThreadStates(
+      [
+        { sourceId: activeId, resumeRef: activeId, sourceUri: activePath },
+        {
+          sourceId: archivedId,
+          resumeRef: archivedId,
+          sourceUri: archivedPath,
+        },
+        { sourceId: missingId, resumeRef: missingId, sourceUri: missingPath },
+        {
+          sourceId: "outside",
+          resumeRef: "10000000-0000-4000-8000-000000000604",
+          sourceUri: join(temporary, "outside.jsonl"),
+        },
+      ],
+      { clock: () => new Date("2026-06-20T12:00:00.000Z") },
+    );
+
+    assert.deepEqual(
+      states.map((state) => state.state),
+      ["active", "archived", "missing", "unknown"],
+    );
+    assert.equal(states[0]?.observedAt, "2026-06-20T12:00:00.000Z");
+    assert.deepEqual(
+      adapter
+        .checkThreadStates([{ sourceId: activeId, resumeRef: activeId }])
+        .map((state) => state.state),
+      ["active"],
+    );
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 });
 
 test("parser diagnoses malformed, unknown, and partial trailing records without stopping", async () => {
@@ -341,4 +406,9 @@ function assertPersistedLimit(
   assert.ok(row);
   assert.ok(row.bytes <= maximumBytes);
   assert.equal(row.truncated, 1);
+}
+
+async function writeStateRollout(path: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, "{}\n", "utf8");
 }

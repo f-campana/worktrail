@@ -5,6 +5,13 @@ import {
   type SearchResult,
   type SearchTimingPhase,
 } from "./search.js";
+import {
+  createCodexLocalSourceStateProvider,
+  sourceStateRequestsForCandidates,
+  type SourceStateCandidate,
+  type SourceStateProvider,
+} from "./source-state.js";
+import type { SourceThreadStateObservation } from "./types.js";
 
 export const RESUME_SEARCH_SCHEMA_VERSION = 1 as const;
 export const RESUME_SCORE_VERSION = 3 as const;
@@ -68,9 +75,11 @@ export type ResumeSearchOptions = {
   includeArchived?: boolean;
   clock?: () => Date;
   timing?: (phase: SearchTimingPhase, durationMs: number) => void;
+  sourceStateProvider?: SourceStateProvider;
 };
 
 type Assignment = { workstreamId: string; name: string; aliasMatch?: string };
+const FRESHNESS_CANDIDATE_LIMIT = 20;
 
 /** Finds deterministic, evidence-excerpt-free targets from indexed local data. */
 export function findResumableTargets(
@@ -82,6 +91,10 @@ export function findResumableTargets(
     throw new Error("Resume requires a query.");
   const limit = Math.max(1, Math.min(options.limit ?? 5, 20));
   const assignments = loadAssignments(database);
+  const freshness = new ResumeFreshnessContext(
+    database,
+    options.sourceStateProvider ?? createCodexLocalSourceStateProvider(),
+  );
   const baseSearchOptions = options.timing ? { timing: options.timing } : {};
   const fastSearchOptions = {
     ...baseSearchOptions,
@@ -90,8 +103,13 @@ export function findResumableTargets(
     selectionExcludeArchived: !options.includeArchived,
     selectionTieBreakByTitle: true,
   };
-  let matches = searchThreads(database, query, 20, fastSearchOptions).filter(
+  let rawMatches = searchThreads(database, query, 20, fastSearchOptions).filter(
     (match) => options.includeArchived || !match.archived,
+  );
+  let matches = filterMatchesByFreshness(
+    rawMatches,
+    freshness,
+    Boolean(options.includeArchived),
   );
   let diagnostics: ResumeDiagnostic[] = [];
   let targets = buildTargets(
@@ -100,12 +118,18 @@ export function findResumableTargets(
     assignments,
     query,
     options,
+    freshness,
     diagnostics,
   );
 
-  if (limit < 20 && targets.size < limit && matches.length >= limit) {
-    matches = searchThreads(database, query, 20, baseSearchOptions).filter(
+  if (limit < 20 && targets.size < limit && rawMatches.length >= limit) {
+    rawMatches = searchThreads(database, query, 20, baseSearchOptions).filter(
       (match) => options.includeArchived || !match.archived,
+    );
+    matches = filterMatchesByFreshness(
+      rawMatches,
+      freshness,
+      Boolean(options.includeArchived),
     );
     diagnostics = [];
     targets = buildTargets(
@@ -114,6 +138,7 @@ export function findResumableTargets(
       assignments,
       query,
       options,
+      freshness,
       diagnostics,
     );
   }
@@ -135,12 +160,142 @@ export function findResumableTargets(
   };
 }
 
+class ResumeFreshnessContext {
+  private readonly cache = new Map<string, SourceThreadStateObservation>();
+
+  constructor(
+    private readonly database: WorktrailDatabase,
+    private readonly provider: SourceStateProvider,
+  ) {}
+
+  observe(
+    candidates: readonly SourceStateCandidate[],
+  ): Map<string, SourceThreadStateObservation> {
+    const unique = new Map<string, SourceStateCandidate>();
+    for (const candidate of candidates) {
+      unique.set(sourceStateKey(candidate), candidate);
+    }
+    const missing = [...unique.values()].filter(
+      (candidate) => !this.cache.has(sourceStateKey(candidate)),
+    );
+    if (missing.length > 0) {
+      for (const observation of this.provider(
+        sourceStateRequestsForCandidates(this.database, missing),
+      )) {
+        this.cache.set(sourceStateKey(observation), observation);
+      }
+    }
+
+    const output = new Map<string, SourceThreadStateObservation>();
+    for (const candidate of unique.values()) {
+      const observation = this.cache.get(sourceStateKey(candidate));
+      if (observation) output.set(sourceStateKey(candidate), observation);
+    }
+    return output;
+  }
+}
+
+function filterMatchesByFreshness(
+  matches: SearchResult[],
+  freshness: ResumeFreshnessContext,
+  includeArchived: boolean,
+): SearchResult[] {
+  const observations = freshness.observe(
+    matches.slice(0, FRESHNESS_CANDIDATE_LIMIT).map((match) => ({
+      sourceId: match.externalId,
+      resumeRef: match.resumeRef,
+      sourceTool: match.sourceTool,
+    })),
+  );
+
+  return matches.flatMap((match) => {
+    const observation = observations.get(
+      sourceStateKey({
+        sourceId: match.externalId,
+        resumeRef: match.resumeRef,
+      }),
+    );
+    if (!observation || observation.state === "unknown") return [match];
+    if (observation.state === "missing") return [];
+    if (observation.state === "active") {
+      return [match.archived ? { ...match, archived: false } : match];
+    }
+    if (!includeArchived) return [];
+    return [archivedSearchResult(match)];
+  });
+}
+
+function filterRunsByFreshness(
+  runs: RunRow[],
+  freshness: ResumeFreshnessContext,
+  includeArchived: boolean,
+): RunRow[] {
+  const observations = freshness.observe(
+    runs.slice(0, FRESHNESS_CANDIDATE_LIMIT).map((run) => ({
+      sourceId: run.externalId,
+      resumeRef: run.resumeRef,
+      sourceTool: run.sourceTool,
+    })),
+  );
+
+  return runs.flatMap((run) => {
+    const observation = observations.get(
+      sourceStateKey({ sourceId: run.externalId, resumeRef: run.resumeRef }),
+    );
+    if (!observation || observation.state === "unknown") return [run];
+    if (observation.state === "missing") return [];
+    if (observation.state === "active") {
+      return [run.archived ? { ...run, archived: false } : run];
+    }
+    if (!includeArchived) return [];
+    return [run.archived ? run : { ...run, archived: true }];
+  });
+}
+
+function archivedSearchResult(match: SearchResult): SearchResult {
+  if (match.archived) return match;
+  return {
+    ...match,
+    archived: true,
+    score: Number(Math.max(0, match.score - archivePenalty(match)).toFixed(3)),
+  };
+}
+
+function alignResultWithRunState(
+  result: SearchResult | undefined,
+  run: RunRow,
+): SearchResult | undefined {
+  if (!result) return undefined;
+  if (run.archived && !result.archived) return archivedSearchResult(result);
+  if (!run.archived && result.archived) return { ...result, archived: false };
+  return result;
+}
+
+function archivePenalty(match: SearchResult): number {
+  const details = match.matchDetails;
+  const strongTitle =
+    details.exactTitle ||
+    details.titlePrefix ||
+    details.titlePhrase ||
+    details.titleTerms.length > 1;
+  const strongProject = details.projectExact || details.projectTerms.length > 1;
+  return strongTitle || strongProject ? 0.03 : 0.1;
+}
+
+function sourceStateKey(candidate: {
+  sourceId: string;
+  resumeRef: string;
+}): string {
+  return `${candidate.sourceId}\0${candidate.resumeRef}`;
+}
+
 function buildTargets(
   database: WorktrailDatabase,
   matches: SearchResult[],
   assignments: Map<string, Assignment>,
   query: string,
   options: ResumeSearchOptions,
+  freshness: ResumeFreshnessContext,
   diagnostics: ResumeDiagnostic[],
 ): Map<string, ResumableTarget> {
   const targets = new Map<string, ResumableTarget>();
@@ -158,7 +313,14 @@ function buildTargets(
     if (!targets.has(key)) {
       targets.set(
         key,
-        workstreamTarget(database, assignment, query, options, diagnostics),
+        workstreamTarget(
+          database,
+          assignment,
+          query,
+          options,
+          freshness,
+          diagnostics,
+        ),
       );
     }
   }
@@ -171,6 +333,7 @@ function buildTargets(
         assignment,
         query,
         options,
+        freshness,
         diagnostics,
       );
       if (target.relatedRuns.length > 0) targets.set(key, target);
@@ -212,17 +375,23 @@ function workstreamTarget(
   assignment: Assignment,
   query: string,
   options: ResumeSearchOptions,
+  freshness: ResumeFreshnessContext,
   diagnostics: ResumeDiagnostic[],
 ): ResumableTarget {
-  const runs = loadWorkstreamRuns(database, assignment.workstreamId).filter(
-    (run) => options.includeArchived || !run.archived,
-  );
+  const runs = filterRunsByFreshness(
+    loadWorkstreamRuns(database, assignment.workstreamId),
+    freshness,
+    Boolean(options.includeArchived),
+  ).filter((run) => options.includeArchived || !run.archived);
   const searchOptions = options.timing ? { timing: options.timing } : {};
   const best = runs
     .map((run) => ({
       run,
-      result: searchThreads(database, query, 20, searchOptions).find(
-        (item) => item.externalId === run.externalId,
+      result: alignResultWithRunState(
+        searchThreads(database, query, 20, searchOptions).find(
+          (item) => item.externalId === run.externalId,
+        ),
+        run,
       ),
     }))
     .sort(

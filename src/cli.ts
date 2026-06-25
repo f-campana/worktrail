@@ -8,8 +8,13 @@ import { WorktrailDatabase } from "./db/database.js";
 import { importSources } from "./importer.js";
 import { evaluateQueries, parseEvalQueries, type EvalEntry } from "./eval.js";
 import { searchThreads, type SearchResult } from "./search.js";
+import { createCodexLocalSourceStateProvider } from "./source-state.js";
 import { buildStateResponse, type StateCard } from "./state.js";
 import { buildDailyReport, type DailyReport } from "./report.js";
+import {
+  validateResumeTarget,
+  type TargetValidationResult,
+} from "./target-validation.js";
 import { findResumableTargets, type ResumeSearchResult } from "./resume.js";
 import {
   addProjectAlias,
@@ -69,6 +74,11 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (args.command === "target") {
+    runTargetCommand(args);
+    return;
+  }
+
   if (args.command === "workstreams") {
     runWorkstreams(args);
     return;
@@ -98,6 +108,7 @@ function runResume(args: ParsedArgs): void {
   if (!query) throw new Error("Resume requires a query.");
   const timingEnabled =
     args.flags.has("debug-timing") || process.env.WORKTRAIL_TIMING === "1";
+  const codexHome = stringFlag(args, "codex-home");
   const phases = new Map<string, number>();
   const recordTiming = (phase: string, durationMs: number) => {
     if (!timingEnabled) return;
@@ -113,6 +124,9 @@ function runResume(args: ParsedArgs): void {
       query,
       limit: numberFlag(args, "limit") ?? 5,
       includeArchived: args.flags.has("include-archived"),
+      sourceStateProvider: createCodexLocalSourceStateProvider({
+        ...(codexHome ? { codexHome } : {}),
+      }),
       ...(timingEnabled ? { timing: recordTiming } : {}),
     });
     recordTiming("search-ranking", performance.now() - searchStartedAt);
@@ -144,6 +158,42 @@ function runResume(args: ParsedArgs): void {
       process.stderr.write(`[worktrail timing] ${JSON.stringify(timing)}\n`);
     }
   }
+}
+
+function runTargetCommand(args: ParsedArgs): void {
+  const [action, resumeRef] = args.positional;
+  if (action !== "validate") {
+    throw new Error("target requires validate.");
+  }
+  if (!resumeRef) throw new Error("target validate requires a resume UUID.");
+  const codexHome = stringFlag(args, "codex-home");
+  const database = new WorktrailDatabase(databasePath(args, false), {
+    readOnly: true,
+  });
+  try {
+    const result = validateResumeTarget(database, resumeRef, {
+      sourceStateProvider: createCodexLocalSourceStateProvider({
+        ...(codexHome ? { codexHome } : {}),
+      }),
+    });
+    console.log(
+      args.flags.has("json")
+        ? JSON.stringify(result, null, 2)
+        : formatHumanTargetValidation(result),
+    );
+  } finally {
+    database.close();
+  }
+}
+
+function formatHumanTargetValidation(result: TargetValidationResult): string {
+  const lines = [
+    `Target: ${result.resumeRef}`,
+    `Status: ${result.status}`,
+    ...(result.openUrl ? [`Open URL: ${result.openUrl}`] : []),
+    ...(result.message ? [`Message: ${result.message}`] : []),
+  ];
+  return lines.join("\n");
 }
 
 function roundedMilliseconds(value: number): number {
@@ -826,7 +876,8 @@ Usage:
   worktrail index --fixtures [--db PATH] [--force]
   worktrail index [--db PATH] [--codex-home PATH] [--max-sources N] [--since ISO_DATE]
   worktrail search "query" [--db PATH] [--limit N] [--json] [--include-ignored]
-  worktrail resume "query" [--db PATH] [--limit N] [--json] [--include-archived] [--debug-timing]
+  worktrail resume "query" [--db PATH] [--limit N] [--json] [--include-archived] [--debug-timing] [--codex-home PATH]
+  worktrail target validate THREAD_UUID [--db PATH] [--json] [--codex-home PATH]
   worktrail state "query" [--db PATH] [--limit N] [--json] [--explain]
   worktrail report --since ISO_INSTANT [--until ISO_INSTANT] [--timezone TIMEZONE] [--db PATH] [--json]
   worktrail workstreams list [--db PATH] [--json]

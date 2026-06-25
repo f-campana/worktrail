@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  rename,
+  rm,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 
 import { WorktrailDatabase } from "../src/db/database.js";
 import { findResumableTargets } from "../src/resume.js";
+import { createCodexLocalSourceStateProvider } from "../src/source-state.js";
+import { validateResumeTarget } from "../src/target-validation.js";
 import {
   assignThread,
   createWorkstream,
@@ -332,6 +341,173 @@ test("included archived results are marked and rank below equivalent active resu
   }
 });
 
+test("freshness guard hides stale archived candidates and keeps them badged when included", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "worktrail-freshness-"));
+  const codexHome = join(directory, "codex");
+  const database = new WorktrailDatabase(join(directory, "worktrail.db"));
+  const stale = syntheticId(230);
+  const active = syntheticId(231);
+  const staleActivePath = codexRolloutPath(codexHome, stale);
+  const activePath = codexRolloutPath(codexHome, active);
+  const staleArchivedPath = codexArchivedPath(codexHome, staleActivePath);
+  try {
+    await writeCodexRollout(staleActivePath);
+    await writeCodexRollout(activePath);
+    insertSyntheticThread(database, {
+      externalId: stale,
+      title: "Freshness Guard",
+      cwd: "/repo/stale",
+      updatedAt: "2026-06-20T12:00:00.000Z",
+      evidence: ["freshness guard"],
+      files: [],
+    });
+    insertSyntheticThread(database, {
+      externalId: active,
+      title: "Freshness Guard",
+      cwd: "/repo/active",
+      updatedAt: "2026-06-19T12:00:00.000Z",
+      evidence: ["freshness guard"],
+      files: [],
+    });
+    setSourceUri(database, stale, staleActivePath);
+    setSourceUri(database, active, activePath);
+    await mkdir(join(codexHome, "archived_sessions"), { recursive: true });
+    await rename(staleActivePath, staleArchivedPath);
+
+    const provider = createCodexLocalSourceStateProvider({ codexHome });
+    const defaultResult = findResumableTargets(database, {
+      query: "freshness guard",
+      sourceStateProvider: provider,
+    });
+    assert.equal(
+      defaultResult.targets.some((target) => target.resumeRef === stale),
+      false,
+    );
+    assert.equal(defaultResult.targets[0]?.resumeRef, active);
+
+    const included = findResumableTargets(database, {
+      query: "freshness guard",
+      includeArchived: true,
+      sourceStateProvider: provider,
+    });
+    assert.equal(included.targets[0]?.resumeRef, active);
+    const archived = included.targets.find(
+      (target) => target.resumeRef === stale,
+    );
+    assert.equal(archived?.archived, true);
+    assert.ok(
+      archived?.signals.some((signal) => signal.type === "archived-penalty"),
+    );
+    assert.ok(included.targets[0]!.score > archived!.score);
+  } finally {
+    database.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("freshness guard hides missing candidates and keeps unknown candidates", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "worktrail-freshness-"));
+  const codexHome = join(directory, "codex");
+  const database = new WorktrailDatabase(join(directory, "worktrail.db"));
+  const missing = syntheticId(232);
+  const unknown = syntheticId(233);
+  const missingPath = codexRolloutPath(codexHome, missing);
+  try {
+    await writeCodexRollout(missingPath);
+    insertSyntheticThread(database, {
+      externalId: missing,
+      title: "Missing Freshness",
+      cwd: "/repo/missing",
+      updatedAt: "2026-06-20T12:00:00.000Z",
+      evidence: ["missing freshness"],
+      files: [],
+    });
+    insertSyntheticThread(database, {
+      externalId: unknown,
+      title: "Unknown Freshness",
+      cwd: "/repo/unknown",
+      updatedAt: "2026-06-20T12:00:00.000Z",
+      evidence: ["unknown freshness"],
+      files: [],
+    });
+    setSourceUri(database, missing, missingPath);
+    await unlink(missingPath);
+
+    const provider = createCodexLocalSourceStateProvider({ codexHome });
+    const missingResult = findResumableTargets(database, {
+      query: "missing freshness",
+      sourceStateProvider: provider,
+    });
+    assert.equal(
+      missingResult.targets.some((target) => target.resumeRef === missing),
+      false,
+    );
+
+    const unknownResult = findResumableTargets(database, {
+      query: "unknown freshness",
+      sourceStateProvider: provider,
+    });
+    assert.equal(unknownResult.targets[0]?.resumeRef, unknown);
+  } finally {
+    database.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("target validation reports openable archived missing and invalid statuses", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "worktrail-target-"));
+  const codexHome = join(directory, "codex");
+  const database = new WorktrailDatabase(join(directory, "worktrail.db"));
+  const id = syntheticId(234);
+  const activePath = codexRolloutPath(codexHome, id);
+  const archivedPath = codexArchivedPath(codexHome, activePath);
+  const provider = createCodexLocalSourceStateProvider({ codexHome });
+  try {
+    await writeCodexRollout(activePath);
+    insertSyntheticThread(database, {
+      externalId: id,
+      title: "Validate target",
+      cwd: "/repo/validate",
+      updatedAt: "2026-06-20T12:00:00.000Z",
+      evidence: ["validate target"],
+      files: [],
+    });
+    setSourceUri(database, id, activePath);
+
+    assert.deepEqual(
+      validateResumeTarget(database, id, { sourceStateProvider: provider }),
+      {
+        schemaVersion: 1,
+        resumeRef: id,
+        status: "openable",
+        openUrl: `codex://threads/${id}`,
+      },
+    );
+
+    await mkdir(join(codexHome, "archived_sessions"), { recursive: true });
+    await rename(activePath, archivedPath);
+    assert.equal(
+      validateResumeTarget(database, id, { sourceStateProvider: provider })
+        .status,
+      "archived",
+    );
+
+    await unlink(archivedPath);
+    assert.equal(
+      validateResumeTarget(database, id, { sourceStateProvider: provider })
+        .status,
+      "missing",
+    );
+    assert.equal(
+      validateResumeTarget(database, "not-a-uuid").status,
+      "invalid",
+    );
+  } finally {
+    database.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("resume bounds limits and excludes archived runs by default", async () => {
   const directory = await mkdtemp(join(tmpdir(), "worktrail-resume-"));
   const database = new WorktrailDatabase(join(directory, "worktrail.db"));
@@ -418,3 +594,33 @@ test("resume accepts UUIDv7 references without allowing unsafe commands", async 
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+function setSourceUri(
+  database: WorktrailDatabase,
+  externalId: string,
+  sourceUri: string,
+): void {
+  database.raw
+    .prepare("UPDATE sources SET source_uri = ? WHERE external_id = ?")
+    .run(sourceUri, externalId);
+}
+
+function codexRolloutPath(codexHome: string, id: string): string {
+  return join(
+    codexHome,
+    "sessions",
+    "2026",
+    "06",
+    "20",
+    `rollout-2026-06-20T12-00-00-${id}.jsonl`,
+  );
+}
+
+function codexArchivedPath(codexHome: string, activePath: string): string {
+  return join(codexHome, "archived_sessions", basename(activePath));
+}
+
+async function writeCodexRollout(path: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, "{}\n", "utf8");
+}

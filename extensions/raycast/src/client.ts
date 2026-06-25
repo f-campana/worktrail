@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 
 import {
   parseResumeSearchResult,
+  parseTargetValidationResult,
   ResumeCompatibilityError,
   ResumeSchemaError,
 } from "./contract.js";
@@ -19,7 +20,11 @@ import {
   resolveWorktrailProjectPath,
   WorktrailProjectPathError,
 } from "./paths.js";
-import type { ResumeSearchResult, WorktrailPreferences } from "./types.js";
+import type {
+  ResumeSearchResult,
+  TargetValidationResult,
+  WorktrailPreferences,
+} from "./types.js";
 import {
   resolveWorktrailExecutable,
   WorktrailResolutionError,
@@ -71,6 +76,7 @@ type SearchDependencies = {
   execute?: typeof execute;
   homeDirectory?: string;
   cache?: ResumeSearchCache;
+  bypassCache?: boolean;
   resolvePnpmExecutable?: typeof resolvePnpmExecutable;
   resolveWorktrailExecutable?: typeof resolveWorktrailExecutable;
 };
@@ -78,10 +84,11 @@ type SearchDependencies = {
 export type ResumeSearchCache = {
   get(key: string): ResumeSearchResult | undefined;
   set(key: string, result: ResumeSearchResult): void;
+  delete(key: string): void;
 };
 
 export function createResumeSearchCache(
-  ttlMs = 45_000,
+  ttlMs = 10_000,
   now: () => number = Date.now,
 ): ResumeSearchCache {
   const entries = new Map<
@@ -100,6 +107,9 @@ export function createResumeSearchCache(
     },
     set(key, result) {
       entries.set(key, { expiresAt: now() + ttlMs, result });
+    },
+    delete(key) {
+      entries.delete(key);
     },
   };
 }
@@ -134,6 +144,34 @@ export function buildPnpmWorktrailInvocation(
   };
 }
 
+export function buildInstalledTargetValidationInvocation(
+  resumeRef: string,
+  preferences: WorktrailPreferences,
+  program = "worktrail",
+): { program: string; args: string[] } {
+  return {
+    program,
+    args: buildTargetValidateArgs(resumeRef, preferences),
+  };
+}
+
+export function buildPnpmTargetValidationInvocation(
+  resumeRef: string,
+  preferences: WorktrailPreferences & { worktrailProjectPath: string },
+  program = "pnpm",
+): { program: string; args: string[] } {
+  return {
+    program,
+    args: [
+      "--silent",
+      "--dir",
+      preferences.worktrailProjectPath,
+      "worktrail",
+      ...buildTargetValidateArgs(resumeRef, preferences),
+    ],
+  };
+}
+
 function buildResumeArgs(
   query: string,
   preferences: WorktrailPreferences,
@@ -151,6 +189,17 @@ function buildResumeArgs(
   return args;
 }
 
+function buildTargetValidateArgs(
+  resumeRef: string,
+  preferences: WorktrailPreferences,
+): string[] {
+  const args = ["target", "validate", resumeRef, "--json"];
+  if (preferences.databasePath?.trim()) {
+    args.push("--db", preferences.databasePath);
+  }
+  return args;
+}
+
 export async function searchWorktrail(
   query: string,
   preferences: WorktrailPreferences,
@@ -158,11 +207,14 @@ export async function searchWorktrail(
   dependencies: SearchDependencies = {},
 ): Promise<ResumeSearchResult> {
   if (signal?.aborted) throw abortError();
+  const hasCustomDependencies = Object.keys(dependencies).some(
+    (key) => key !== "bypassCache",
+  );
   const cache =
     dependencies.cache ??
-    (Object.keys(dependencies).length === 0 ? sessionSearchCache : undefined);
+    (!hasCustomDependencies ? sessionSearchCache : undefined);
   const cacheKey = resumeSearchCacheKey(query, preferences);
-  const cached = cache?.get(cacheKey);
+  const cached = dependencies.bypassCache ? undefined : cache?.get(cacheKey);
   if (cached) return cached;
 
   const homeDirectory = dependencies.homeDirectory ?? homedir();
@@ -262,6 +314,125 @@ export async function searchWorktrail(
     }
     throw error;
   }
+}
+
+export async function validateWorktrailTarget(
+  resumeRef: string,
+  preferences: WorktrailPreferences,
+  signal?: AbortSignal,
+  dependencies: SearchDependencies = {},
+): Promise<TargetValidationResult> {
+  if (signal?.aborted) throw abortError();
+  const homeDirectory = dependencies.homeDirectory ?? homedir();
+  const databasePath = await resolveOptionalDatabasePath(
+    preferences.databasePath,
+    homeDirectory,
+  );
+  const installedExecutable = await (
+    dependencies.resolveWorktrailExecutable ?? resolveWorktrailExecutable
+  )(preferences.worktrailPath, { homeDirectory });
+  let mode: "installed" | "pnpm";
+  let cwd: string;
+  let invocation: { program: string; args: string[] };
+  if (installedExecutable) {
+    mode = "installed";
+    cwd = homeDirectory;
+    invocation = buildInstalledTargetValidationInvocation(
+      resumeRef,
+      { ...preferences, databasePath },
+      installedExecutable,
+    );
+  } else if (preferences.worktrailProjectPath?.trim()) {
+    mode = "pnpm";
+    const worktrailProjectPath = await resolveWorktrailProjectPath(
+      preferences.worktrailProjectPath,
+      homeDirectory,
+    );
+    const pnpmExecutable = await (
+      dependencies.resolvePnpmExecutable ?? resolvePnpmExecutable
+    )(preferences.pnpmPath, { homeDirectory });
+    cwd = worktrailProjectPath;
+    invocation = buildPnpmTargetValidationInvocation(
+      resumeRef,
+      { ...preferences, databasePath, worktrailProjectPath },
+      pnpmExecutable,
+    );
+  } else {
+    throw new WorktrailResolutionError(
+      preferences.worktrailPath,
+      homeDirectory,
+    );
+  }
+
+  const debugCommand = formatDebugCommand(invocation, homeDirectory);
+  let stdout: string;
+  try {
+    stdout = await (dependencies.execute ?? execute)(
+      invocation.program,
+      invocation.args,
+      cwd,
+      signal,
+      homeDirectory,
+    );
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      throw new WorktrailSpawnError(mode);
+    }
+    if (isNodeError(error) && error.code === "ABORT_ERR") throw error;
+    if (
+      (isNodeError(error) && error.killed) ||
+      (isNodeError(error) && error.code === "ETIMEDOUT")
+    ) {
+      throw new WorktrailTimeoutError(debugCommand);
+    }
+    throw new WorktrailCliError(
+      errorCode(error),
+      errorField(error, "stdout"),
+      errorField(error, "stderr"),
+      debugCommand,
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout) as unknown;
+  } catch {
+    throw new WorktrailResponseError(
+      "json",
+      "Worktrail returned invalid JSON on stdout.",
+      debugCommand,
+    );
+  }
+  try {
+    if (signal?.aborted) throw abortError();
+    return parseTargetValidationResult(parsed);
+  } catch (error) {
+    if (error instanceof ResumeCompatibilityError) {
+      throw new WorktrailResponseError(
+        "compatibility",
+        error.message,
+        debugCommand,
+      );
+    }
+    if (error instanceof ResumeSchemaError) {
+      throw new WorktrailResponseError("schema", error.message, debugCommand);
+    }
+    throw error;
+  }
+}
+
+export function cachedResumeSearchResult(
+  query: string,
+  preferences: WorktrailPreferences,
+): ResumeSearchResult | undefined {
+  return sessionSearchCache.get(resumeSearchCacheKey(query, preferences));
+}
+
+export function invalidateResumeSearchCache(
+  query: string,
+  preferences: WorktrailPreferences,
+): void {
+  sessionSearchCache.delete(resumeSearchCacheKey(query, preferences));
 }
 
 export function resumeSearchCacheKey(

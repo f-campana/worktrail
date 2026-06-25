@@ -34,12 +34,19 @@ version 3 and additive project/alias signals.
 Archived Codex threads are hidden by default; `--include-archived` includes
 penalized targets with additive `archived: true` display metadata. Ignored
 Worktrail runs remain excluded.
+Before returning Fast Resume targets, Worktrail checks the current Codex-local
+state for the bounded top candidate set using rollout metadata only. It does
+not full-reindex, hydrate transcripts, rebuild FTS, or write to the database on
+the normal read path. Active targets stay visible, archived and missing targets
+are hidden by default, archived targets remain available with
+`--include-archived`, and unknown state is kept rather than hidden.
 Use `pnpm worktrail ...` for the equivalent source-development workflow.
 
 For a keyboard-first private launcher, the repository also includes a thin
 [Raycast extension](extensions/raycast/README.md). It delegates ranking and
 action construction to this CLI. A declared `codex://threads/<UUID>` action
-opens the exact local Codex thread; the inert `codex resume <UUID>` command
+opens the exact local Codex thread only after Raycast asks Worktrail to validate
+that target's current source state. The inert `codex resume <UUID>` command
 remains available as a copy fallback. Neither path starts a Codex turn.
 
 ## Build and install the local CLI
@@ -64,6 +71,7 @@ Add `$HOME/.local/bin` to `PATH` if needed, or call the absolute executable:
 "$HOME/.local/bin/worktrail" search "profile" --json
 "$HOME/.local/bin/worktrail" report --since 2026-06-20T00:00:00Z --json
 "$HOME/.local/bin/worktrail" resume "profile" --json --limit 5
+"$HOME/.local/bin/worktrail" target validate THREAD_UUID --json
 ```
 
 Re-run `pnpm build` and the `npm install` command after local source changes.
@@ -357,6 +365,27 @@ pnpm worktrail state "resume safe apply GUI"
 
 The default local database is `~/.worktrail/worktrail.db`. Override it with
 `--db PATH`, and override the Codex directory with `--codex-home PATH`.
+
+Fast Resume freshness is source-state based, not reindex based. The Codex-local
+checker compares candidate thread IDs to current rollout metadata under
+`sessions/` and `archived_sessions/`; if a previously indexed file disappears,
+the state is `missing`. If the source shape cannot be classified safely, the
+state is `unknown` and the result is not hidden solely for that reason. The hot
+`resume` path stays read-only and does not refresh persistent archive flags.
+
+Validate one target before opening it from a cached or external client result:
+
+```sh
+pnpm worktrail target validate THREAD_UUID --json
+```
+
+Openable targets return `status: "openable"` plus a Worktrail-declared
+`codex://threads/<UUID>` URL. Archived, missing, unknown, and invalid targets do
+not return an open URL. `unknown` is fail-closed for opening because Worktrail
+could not prove the thread is currently available; run `resume` again or reindex
+when that happens. No explicit state-sync command is required for v0 because the
+bounded candidate check and click-time validation cover the stale-open failure
+without adding a write path or full reindex to launcher search.
 
 For a bounded, metadata-only console smoke run against a few real sources:
 
