@@ -133,12 +133,12 @@ export type BuildAttentionDigestFromReportOptions = {
   sourceStateProvider?: SourceStateProvider;
 };
 
-const PHASE_THREE_LIMITATION =
-  "Phase 3 only; source-state attention items are evaluated for changed-work Codex targets, but dirty Git, source-health aggregation, source stale rules, index diagnostics, CLI output, and human formatting are not.";
+const PHASE_FOUR_LIMITATION =
+  "Phase 4 only; JSON CLI output is available, but human formatting, dirty Git, source-health aggregation, source stale rules, and index diagnostics are not.";
 const UNKNOWN_TARGET_LIMITATION =
   "One or more changed-work Codex targets could not be verified; unknown targets fail closed and expose no open action.";
 
-/** Builds the Phase 3 digest by composing exactly one DailyReport result. */
+/** Builds the Phase 4 digest by composing exactly one DailyReport result. */
 export function buildAttentionDigest(
   database: WorktrailDatabase,
   options: BuildAttentionDigestOptions,
@@ -151,7 +151,7 @@ export function buildAttentionDigest(
   });
 }
 
-/** Maps an already composed report into the Phase 3 digest contract. */
+/** Maps an already composed report into the Phase 4 digest contract. */
 export function buildAttentionDigestFromReport(
   database: WorktrailDatabase,
   report: DailyReport,
@@ -201,7 +201,7 @@ export function buildAttentionDigestFromReport(
     limitations: [
       ...new Set([
         ...report.limitations,
-        PHASE_THREE_LIMITATION,
+        PHASE_FOUR_LIMITATION,
         ...(sourceState.counts.unknown > 0 ? [UNKNOWN_TARGET_LIMITATION] : []),
       ]),
     ],

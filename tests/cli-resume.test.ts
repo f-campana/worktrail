@@ -206,6 +206,7 @@ test("read-only commands report stale and newer schemas without JSON stdout", as
     for (const command of [
       ["resume", "profile", "--json"],
       ["target", "validate", syntheticId(305), "--json"],
+      ["attention", "--since", "2026-06-20T00:00:00Z", "--json"],
     ]) {
       const result = spawnSync(
         cli,

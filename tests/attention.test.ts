@@ -27,7 +27,7 @@ const options = {
   clock: () => new Date(generatedAt),
 };
 
-test("builds the deterministic Phase 3 skeleton from one report window", async () =>
+test("builds the deterministic Phase 4 skeleton from one report window", async () =>
   withDatabase((database) => {
     const digest = buildAttentionDigest(database, options);
     assert.equal(digest.schemaVersion, 1);
@@ -55,7 +55,7 @@ test("builds the deterministic Phase 3 skeleton from one report window", async (
       missingTargets: 0,
       unavailableSourceObservations: 0,
     });
-    assert.match(digest.limitations.at(-1)!, /Phase 3 only/);
+    assert.match(digest.limitations.at(-1)!, /Phase 4 only/);
   }));
 
 test("adds safe actions only for active Codex targets", async () =>

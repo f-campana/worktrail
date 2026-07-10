@@ -10,6 +10,7 @@ import { searchThreads, type SearchResult } from "./search.js";
 import { createCodexLocalSourceStateProvider } from "./source-state.js";
 import { buildStateResponse, type StateCard } from "./state.js";
 import { buildDailyReport, type DailyReport } from "./report.js";
+import { buildAttentionDigest } from "./attention.js";
 import {
   validateResumeTarget,
   type TargetValidationResult,
@@ -65,6 +66,11 @@ async function main(): Promise<void> {
 
   if (args.command === "report") {
     runReport(args);
+    return;
+  }
+
+  if (args.command === "attention") {
+    runAttention(args);
     return;
   }
 
@@ -231,8 +237,8 @@ export function formatHumanResume(result: ResumeSearchResult): string {
 }
 
 function runReport(args: ParsedArgs): void {
-  const since = reportInstantFlag(args, "since", true)!;
-  const until = reportInstantFlag(args, "until", false) ?? new Date();
+  const since = instantFlag(args, "report", "since", true)!;
+  const until = instantFlag(args, "report", "until", false) ?? new Date();
   const timezone = stringFlag(args, "timezone")?.trim() || "UTC";
   const database = new WorktrailDatabase(databasePath(args, false));
   try {
@@ -247,14 +253,41 @@ function runReport(args: ParsedArgs): void {
   }
 }
 
-function reportInstantFlag(
+function runAttention(args: ParsedArgs): void {
+  if (!args.flags.has("json")) {
+    throw new Error("attention currently supports --json only.");
+  }
+  const since = instantFlag(args, "attention", "since", true)!;
+  const until = instantFlag(args, "attention", "until", false) ?? new Date();
+  const timezone = stringFlag(args, "timezone")?.trim() || "UTC";
+  const codexHome = stringFlag(args, "codex-home");
+  const database = new WorktrailDatabase(databasePath(args, false), {
+    readOnly: true,
+  });
+  try {
+    const digest = buildAttentionDigest(database, {
+      since,
+      until,
+      timezone,
+      sourceStateProvider: createCodexLocalSourceStateProvider({
+        ...(codexHome ? { codexHome } : {}),
+      }),
+    });
+    console.log(JSON.stringify(digest, null, 2));
+  } finally {
+    database.close();
+  }
+}
+
+function instantFlag(
   args: ParsedArgs,
+  command: "report" | "attention",
   name: "since" | "until",
   required: boolean,
 ): Date | undefined {
   const value = stringFlag(args, name);
   if (!value) {
-    if (required) throw new Error("report requires --since <ISO_INSTANT>.");
+    if (required) throw new Error(`${command} requires --since <ISO_INSTANT>.`);
     return undefined;
   }
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) {
@@ -879,6 +912,7 @@ Usage:
   worktrail target validate THREAD_UUID [--db PATH] [--json] [--codex-home PATH]
   worktrail state "query" [--db PATH] [--limit N] [--json] [--explain]
   worktrail report --since ISO_INSTANT [--until ISO_INSTANT] [--timezone TIMEZONE] [--db PATH] [--json]
+  worktrail attention --since ISO_INSTANT [--until ISO_INSTANT] [--timezone TIMEZONE] [--db PATH] [--codex-home PATH] --json
   worktrail workstreams list [--db PATH] [--json]
   worktrail workstreams create "name" [--db PATH] [--json]
   worktrail workstreams rename WORKSTREAM_ID "name" [--db PATH] [--json]
