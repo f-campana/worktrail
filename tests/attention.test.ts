@@ -27,7 +27,7 @@ const options = {
   clock: () => new Date(generatedAt),
 };
 
-test("builds the deterministic Phase 2 skeleton from one report window", async () =>
+test("builds the deterministic Phase 3 skeleton from one report window", async () =>
   withDatabase((database) => {
     const digest = buildAttentionDigest(database, options);
     assert.equal(digest.schemaVersion, 1);
@@ -55,7 +55,7 @@ test("builds the deterministic Phase 2 skeleton from one report window", async (
       missingTargets: 0,
       unavailableSourceObservations: 0,
     });
-    assert.match(digest.limitations.at(-1)!, /Phase 2 only/);
+    assert.match(digest.limitations.at(-1)!, /Phase 3 only/);
   }));
 
 test("adds safe actions only for active Codex targets", async () =>
@@ -88,9 +88,10 @@ test("adds safe actions only for active Codex targets", async () =>
       missingTargets: 0,
       unavailableSourceObservations: 0,
     });
+    assert.deepEqual(digest.attentionItems, []);
   }));
 
-test("archived, missing, and unknown targets fail closed without attention items", async () =>
+test("archived, missing, and unknown targets emit bounded items and fail closed", async () =>
   withDatabase((database) => {
     const archived = syntheticId(31);
     const missing = syntheticId(32);
@@ -121,7 +122,55 @@ test("archived, missing, and unknown targets fail closed without attention items
       missingTargets: 1,
       unavailableSourceObservations: 1,
     });
-    assert.deepEqual(digest.attentionItems, []);
+    assert.deepEqual(
+      digest.attentionItems.map((item) => [
+        item.kind,
+        item.priority,
+        item.subject.id,
+      ]),
+      [
+        ["archived-or-missing-resume-target", "medium", archived],
+        ["archived-or-missing-resume-target", "medium", missing],
+        ["unknown-state", "info", unknown],
+      ],
+    );
+    assert.deepEqual(digest.summary, {
+      attentionCount: 3,
+      highCount: 0,
+      mediumCount: 2,
+      lowCount: 0,
+      infoCount: 1,
+      changedWorkCount: 1,
+      sourceHealth: "unknown",
+    });
+    for (const item of digest.attentionItems) {
+      assert.equal(
+        item.actions.some(
+          (action) =>
+            action.kind === "open-codex" || action.kind === "copy-command",
+        ),
+        false,
+      );
+      assert.deepEqual(item.sourceRefs, [
+        {
+          sourceTool: "codex-local",
+          sourceId: item.subject.id,
+          observation:
+            item.subject.id === archived
+              ? "archived"
+              : item.subject.id === missing
+                ? "missing"
+                : "unknown",
+          observedAt: generatedAt,
+        },
+      ]);
+      assert.deepEqual(
+        item.evidenceRefs.map((ref) => ref.kind),
+        ["source-state", "activity"],
+      );
+    }
+    for (const item of digest.attentionItems.slice(0, 2))
+      assert.doesNotMatch(item.reason, /done|blocked|review|merge/i);
     assert.deepEqual(digest.sourceHealth, []);
     assert.equal(digest.summary.sourceHealth, "unknown");
     assert.ok(digest.limitations.some((item) => item.includes("fail closed")));
@@ -160,7 +209,11 @@ test("group action prefers the latest active run while counting older unavailabl
     );
     assert.equal(digest.omitted.archivedTargets, 1);
     assert.equal(digest.omitted.missingTargets, 1);
-    assert.equal(digest.attentionItems.length, 0);
+    assert.deepEqual(
+      digest.attentionItems.map((item) => item.subject.id),
+      [latestArchived, missing],
+    );
+    assert.equal(digest.summary.mediumCount, 2);
   }));
 
 test("absent observations and unsafe refs never produce open actions", async () =>
@@ -183,6 +236,17 @@ test("absent observations and unsafe refs never produce open actions", async () 
       [],
     );
     assert.equal(digest.omitted.unavailableSourceObservations, 2);
+    assert.equal(digest.summary.infoCount, 2);
+    assert.ok(
+      digest.attentionItems.every((item) => item.kind === "unknown-state"),
+    );
+    assert.ok(
+      digest.attentionItems.every((item) =>
+        item.limitations.some((limitation) =>
+          limitation.includes("fail closed"),
+        ),
+      ),
+    );
   }));
 
 test("source provider failures become unavailable observations", async () =>
@@ -197,7 +261,9 @@ test("source provider failures become unavailable observations", async () =>
     });
     assert.deepEqual(digest.changedWork[0]?.actions, []);
     assert.equal(digest.omitted.unavailableSourceObservations, 1);
-    assert.deepEqual(digest.attentionItems, []);
+    assert.equal(digest.attentionItems[0]?.kind, "unknown-state");
+    assert.equal(digest.attentionItems[0]?.freshness, "unknown");
+    assert.equal(digest.summary.infoCount, 1);
   }));
 
 test("groups canonical, durable project, and unassigned work exactly once", async () =>
@@ -273,7 +339,7 @@ test("groups canonical, durable project, and unassigned work exactly once", asyn
     );
     assert.deepEqual(digest.changedWork[0]?.relatedFiles, ["src/a.ts"]);
     assert.equal(new Set(digest.limitations).size, digest.limitations.length);
-    assert.deepEqual(digest.attentionItems, []);
+    assert.equal(digest.attentionItems.length, 3);
     assert.deepEqual(
       digest.changedWork.flatMap((group) => group.actions),
       [],
@@ -305,6 +371,41 @@ test("ordering uses latest activity then kind, title, and id", async () =>
       first.changedWork.map((item) => item.group.title),
       ["Alpha", "Zulu"],
     );
+  }));
+
+test("orders source-state items by priority, freshness, and changed time deterministically", async () =>
+  withDatabase((database) => {
+    const olderArchived = syntheticId(41);
+    const newerMissing = syntheticId(42);
+    const unknown = syntheticId(43);
+    insertRun(
+      database,
+      olderArchived,
+      "Older archived",
+      "2026-06-18T12:00:00.000Z",
+    );
+    insertRun(
+      database,
+      newerMissing,
+      "Newer missing",
+      "2026-06-18T15:00:00.000Z",
+    );
+    insertRun(database, unknown, "Unknown", "2026-06-18T16:00:00.000Z");
+    const build = () =>
+      buildAttentionDigest(database, {
+        ...options,
+        sourceStateProvider: states({
+          [olderArchived]: "archived",
+          [newerMissing]: "missing",
+          [unknown]: "unknown",
+        }),
+      });
+    const first = build();
+    assert.deepEqual(
+      first.attentionItems.map((item) => item.subject.id),
+      [newerMissing, olderArchived, unknown],
+    );
+    assert.equal(JSON.stringify(first), JSON.stringify(build()));
   }));
 
 test("result exposes no transcript excerpts or unsupported state claims", async () =>

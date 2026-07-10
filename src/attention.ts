@@ -133,12 +133,12 @@ export type BuildAttentionDigestFromReportOptions = {
   sourceStateProvider?: SourceStateProvider;
 };
 
-const PHASE_TWO_LIMITATION =
-  "Phase 2 only; changed-work source-state and safe actions are evaluated, but attention rules and source-health aggregation are not.";
+const PHASE_THREE_LIMITATION =
+  "Phase 3 only; source-state attention items are evaluated for changed-work Codex targets, but dirty Git, source-health aggregation, source stale rules, index diagnostics, CLI output, and human formatting are not.";
 const UNKNOWN_TARGET_LIMITATION =
   "One or more changed-work Codex targets could not be verified; unknown targets fail closed and expose no open action.";
 
-/** Builds the Phase 2 digest by composing exactly one DailyReport result. */
+/** Builds the Phase 3 digest by composing exactly one DailyReport result. */
 export function buildAttentionDigest(
   database: WorktrailDatabase,
   options: BuildAttentionDigestOptions,
@@ -151,7 +151,7 @@ export function buildAttentionDigest(
   });
 }
 
-/** Maps an already composed report into the Phase 2 digest contract. */
+/** Maps an already composed report into the Phase 3 digest contract. */
 export function buildAttentionDigestFromReport(
   database: WorktrailDatabase,
   report: DailyReport,
@@ -161,25 +161,35 @@ export function buildAttentionDigestFromReport(
   const sourceState = observeChangedWorkSourceState(
     database,
     changedWork,
-    options.sourceStateProvider ?? createCodexLocalSourceStateProvider(),
+    options.sourceStateProvider ??
+      createCodexLocalSourceStateProvider({
+        clock: () => new Date(report.generatedAt),
+      }),
+    report.generatedAt,
   );
   const observedChangedWork = changedWork.map((group) =>
     addSafeGroupActions(group, sourceState.observations),
   );
+  const attentionItems = buildSourceStateAttentionItems(
+    observedChangedWork,
+    sourceState.observations,
+  );
+  const count = (priority: AttentionItem["priority"]) =>
+    attentionItems.filter((item) => item.priority === priority).length;
   return {
     schemaVersion: ATTENTION_DIGEST_SCHEMA_VERSION,
     generatedAt: report.generatedAt,
     window: report.window,
     summary: {
-      attentionCount: 0,
-      highCount: 0,
-      mediumCount: 0,
-      lowCount: 0,
-      infoCount: 0,
+      attentionCount: attentionItems.length,
+      highCount: count("high"),
+      mediumCount: count("medium"),
+      lowCount: count("low"),
+      infoCount: count("info"),
       changedWorkCount: observedChangedWork.length,
       sourceHealth: "unknown",
     },
-    attentionItems: [],
+    attentionItems,
     changedWork: observedChangedWork,
     sourceHealth: [],
     omitted: {
@@ -191,7 +201,7 @@ export function buildAttentionDigestFromReport(
     limitations: [
       ...new Set([
         ...report.limitations,
-        PHASE_TWO_LIMITATION,
+        PHASE_THREE_LIMITATION,
         ...(sourceState.counts.unknown > 0 ? [UNKNOWN_TARGET_LIMITATION] : []),
       ]),
     ],
@@ -202,6 +212,7 @@ function observeChangedWorkSourceState(
   database: WorktrailDatabase,
   changedWork: ChangedWorkGroup[],
   provider: SourceStateProvider,
+  observedAt: string,
 ): {
   observations: Map<string, SourceThreadStateObservation>;
   counts: Record<Exclude<SourceThreadState, "active">, number>;
@@ -221,11 +232,111 @@ function observeChangedWorkSourceState(
   );
   const counts = { archived: 0, missing: 0, unknown: 0 };
   for (const candidate of candidates) {
-    const state =
-      observations.get(sourceStateKey(candidate))?.state ?? "unknown";
+    const key = sourceStateKey(candidate);
+    if (!observations.has(key)) {
+      observations.set(key, {
+        sourceId: candidate.sourceId,
+        resumeRef: candidate.resumeRef,
+        sourceTool: "codex-local",
+        state: "unknown",
+        observedAt,
+      });
+    }
+    const state = observations.get(key)!.state;
     if (state !== "active") counts[state] += 1;
   }
   return { observations, counts };
+}
+
+function buildSourceStateAttentionItems(
+  changedWork: ChangedWorkGroup[],
+  observations: ReadonlyMap<string, SourceThreadStateObservation>,
+): AttentionItem[] {
+  const items = new Map<string, AttentionItem>();
+  for (const run of changedWork.flatMap((group) => group.runs)) {
+    if (run.sourceTool !== "codex-local" || !run.resumeRef) continue;
+    const observation = observations.get(sourceStateKey(run));
+    if (!observation || observation.state === "active") continue;
+    const unavailable =
+      observation.state === "archived" || observation.state === "missing";
+    const ruleId = unavailable
+      ? "resume-target-unavailable/v1"
+      : "resume-state-unknown/v1";
+    const id = `${ruleId}:codex-local:${run.sourceId}:${observation.state}`;
+    items.set(id, {
+      id,
+      ruleId,
+      kind: unavailable ? "archived-or-missing-resume-target" : "unknown-state",
+      subject: {
+        kind: "run",
+        id: run.sourceId,
+        title: run.title ?? run.sourceId,
+      },
+      title: unavailable
+        ? "Resume target unavailable"
+        : "Resume target state unknown",
+      reason: unavailable
+        ? "This changed-work Codex target is currently archived or missing, so no open action is exposed."
+        : "Worktrail could not verify the current state of this changed-work Codex target, so no open action is exposed.",
+      priority: unavailable ? "medium" : "info",
+      confidence: "high",
+      freshness: unavailable ? "fresh" : "unknown",
+      changedAt: run.lastActivity,
+      sourceRefs: [
+        {
+          sourceTool: "codex-local",
+          sourceId: run.sourceId,
+          observation: observation.state,
+          observedAt: observation.observedAt,
+        },
+      ],
+      evidenceRefs: [
+        {
+          kind: "source-state",
+          ref: run.sourceId,
+          occurredAt: observation.observedAt,
+        },
+        {
+          kind: "activity",
+          ref: run.sourceId,
+          occurredAt: run.lastActivity,
+        },
+      ],
+      actions: [
+        {
+          kind: "copy-id",
+          label: "Copy run ID",
+          value: run.sourceId,
+          validation: "not-required",
+        },
+        ...(run.title
+          ? [
+              {
+                kind: "copy-title" as const,
+                label: "Copy run title",
+                value: run.title,
+                validation: "not-required" as const,
+              },
+            ]
+          : []),
+      ],
+      limitations: unavailable
+        ? ["The source-state observation does not establish work status."]
+        : [
+            "The target state could not be verified; unknown targets fail closed.",
+          ],
+    });
+  }
+  const priority = { high: 0, medium: 1, low: 2, info: 3 } as const;
+  const freshness = { fresh: 0, stale: 1, unknown: 2 } as const;
+  return [...items.values()].sort(
+    (left, right) =>
+      priority[left.priority] - priority[right.priority] ||
+      freshness[left.freshness] - freshness[right.freshness] ||
+      (right.changedAt ?? "").localeCompare(left.changedAt ?? "") ||
+      left.ruleId.localeCompare(right.ruleId) ||
+      left.id.localeCompare(right.id),
+  );
 }
 
 function uniqueSourceStateCandidates(
