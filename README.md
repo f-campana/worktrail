@@ -13,6 +13,8 @@ The existing report baseline is specified in the
 [`daily report PRD`](docs/prd/control-tower-daily-report.md). The Project
 Identity + Aliases v0 foundation is specified in the
 [`Project Identity + Aliases v0 RFC`](docs/rfc/project-identity-aliases-v0.md).
+The next deterministic orientation slice is specified in the
+[`Daily Attention Digest v0 RFC`](docs/rfc/daily-attention-digest-v0.md).
 The completed Fast Resume foundation is specified in the
 [`Fast Resume PRD`](docs/prd/fast-resume.md) and
 [`ADR 0005`](docs/adr/0005-fast-resume-as-adoption-wedge.md).
