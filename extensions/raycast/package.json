@@ -61,6 +61,14 @@
           "required": false
         },
         {
+          "name": "codexHomePath",
+          "title": "Codex home path",
+          "description": "Optional Codex home passed to Worktrail for freshness checks and target validation.",
+          "type": "directory",
+          "required": false,
+          "placeholder": "~/.codex"
+        },
+        {
           "name": "resultLimit",
           "title": "Result Limit",
           "description": "Maximum ranked targets requested from Worktrail.",

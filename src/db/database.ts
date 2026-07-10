@@ -47,6 +47,23 @@ const MIGRATIONS = [
   },
 ] as const;
 
+export const CURRENT_DATABASE_SCHEMA_VERSION =
+  MIGRATIONS[MIGRATIONS.length - 1]!.version;
+export const DATABASE_UPDATE_MESSAGE =
+  "Worktrail database needs an update. Run `worktrail index` once, then retry.";
+export const DATABASE_NEWER_THAN_CLI_MESSAGE =
+  "Worktrail database is newer than this CLI. Update Worktrail, then retry.";
+
+export class WorktrailDatabaseSchemaError extends Error {
+  constructor(
+    readonly kind: "needs-update" | "newer-than-cli",
+    message: string,
+  ) {
+    super(message);
+    this.name = "WorktrailDatabaseSchemaError";
+  }
+}
+
 type SourceRow = {
   id: number;
   fingerprint: string;
@@ -72,7 +89,19 @@ export class WorktrailDatabase {
     this.raw.exec("PRAGMA busy_timeout = 5000");
     options.timing?.("sqlite-setup", performance.now() - setupStartedAt);
 
-    if (!options.readOnly) {
+    if (options.readOnly) {
+      const migrationStartedAt = performance.now();
+      try {
+        this.assertReadableSchema();
+      } catch (error) {
+        this.raw.close();
+        throw error;
+      }
+      options.timing?.(
+        "migration-check",
+        performance.now() - migrationStartedAt,
+      );
+    } else {
       const migrationStartedAt = performance.now();
       this.migrate();
       options.timing?.(
@@ -192,6 +221,38 @@ export class WorktrailDatabase {
           )
           .run(migration.version, migration.name, new Date().toISOString());
       });
+    }
+  }
+
+  private assertReadableSchema(): void {
+    let versions: number[];
+    try {
+      versions = (
+        this.raw
+          .prepare("SELECT version FROM schema_migrations")
+          .all() as Array<{
+          version: number;
+        }>
+      ).map((row) => row.version);
+    } catch {
+      throw new WorktrailDatabaseSchemaError(
+        "needs-update",
+        DATABASE_UPDATE_MESSAGE,
+      );
+    }
+
+    const newestVersion = Math.max(0, ...versions);
+    if (newestVersion > CURRENT_DATABASE_SCHEMA_VERSION) {
+      throw new WorktrailDatabaseSchemaError(
+        "newer-than-cli",
+        DATABASE_NEWER_THAN_CLI_MESSAGE,
+      );
+    }
+    if (!versions.includes(CURRENT_DATABASE_SCHEMA_VERSION)) {
+      throw new WorktrailDatabaseSchemaError(
+        "needs-update",
+        DATABASE_UPDATE_MESSAGE,
+      );
     }
   }
 }

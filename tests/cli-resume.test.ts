@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { WorktrailDatabase } from "../src/db/database.js";
@@ -112,6 +113,139 @@ test("read-only resume skips migration and write setup", async () => {
     );
   } finally {
     readOnly.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("resume honors CODEX_HOME by default and an explicit Codex home override", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "worktrail-codex-home-"));
+  const dbPath = join(directory, "worktrail.db");
+  const codexHome = join(directory, "codex-default");
+  const explicitCodexHome = join(directory, "codex-explicit");
+  const database = new WorktrailDatabase(dbPath);
+  const id = syntheticId(304);
+  const missingPath = join(
+    codexHome,
+    "sessions",
+    "2026",
+    "06",
+    "20",
+    `rollout-2026-06-20T12-00-00-${id}.jsonl`,
+  );
+  try {
+    await mkdir(join(codexHome, "sessions"), { recursive: true });
+    await mkdir(join(explicitCodexHome, "sessions"), { recursive: true });
+    insertSyntheticThread(database, {
+      externalId: id,
+      title: "Custom home resume",
+      cwd: "/repo",
+      updatedAt: "2026-06-20T10:00:00.000Z",
+      evidence: ["custom home resume"],
+      files: [],
+    });
+    database.raw
+      .prepare("UPDATE sources SET source_uri = ? WHERE external_id = ?")
+      .run(missingPath, id);
+    database.close();
+
+    const fromEnvironment = spawnSync(
+      cli,
+      ["src/cli.ts", "resume", "custom home resume", "--db", dbPath, "--json"],
+      {
+        encoding: "utf8",
+        env: { ...process.env, CODEX_HOME: codexHome },
+      },
+    );
+    assert.equal(fromEnvironment.status, 0, fromEnvironment.stderr);
+    assert.deepEqual(JSON.parse(fromEnvironment.stdout).targets, []);
+
+    const explicitMissingPath = missingPath.replace(
+      codexHome,
+      explicitCodexHome,
+    );
+    const writable = new WorktrailDatabase(dbPath);
+    writable.raw
+      .prepare("UPDATE sources SET source_uri = ? WHERE external_id = ?")
+      .run(explicitMissingPath, id);
+    writable.close();
+    const fromFlag = spawnSync(
+      cli,
+      [
+        "src/cli.ts",
+        "resume",
+        "custom home resume",
+        "--db",
+        dbPath,
+        "--codex-home",
+        explicitCodexHome,
+        "--json",
+      ],
+      {
+        encoding: "utf8",
+        env: { ...process.env, CODEX_HOME: join(directory, "wrong-home") },
+      },
+    );
+    assert.equal(fromFlag.status, 0, fromFlag.stderr);
+    assert.deepEqual(JSON.parse(fromFlag.stdout).targets, []);
+  } finally {
+    try {
+      database.close();
+    } catch {}
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("read-only commands report stale and newer schemas without JSON stdout", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "worktrail-stale-schema-"));
+  const dbPath = join(directory, "worktrail.db");
+  try {
+    const stale = new WorktrailDatabase(dbPath);
+    stale.raw.prepare("DELETE FROM schema_migrations WHERE version = 4").run();
+    stale.close();
+
+    for (const command of [
+      ["resume", "profile", "--json"],
+      ["target", "validate", syntheticId(305), "--json"],
+    ]) {
+      const result = spawnSync(
+        cli,
+        ["src/cli.ts", ...command, "--db", dbPath],
+        {
+          encoding: "utf8",
+        },
+      );
+      assert.notEqual(result.status, 0);
+      assert.equal(result.stdout, "");
+      assert.match(result.stderr, /Worktrail database needs an update/);
+      assert.match(result.stderr, /worktrail index/);
+      assert.doesNotMatch(
+        result.stderr,
+        /SQLITE_ERROR|no such table|at runResume/,
+      );
+    }
+
+    const newer = new DatabaseSync(dbPath);
+    newer
+      .prepare(
+        "INSERT INTO schema_migrations(version, name, applied_at) VALUES (4, 'project-identities', 'now')",
+      )
+      .run();
+    newer
+      .prepare(
+        "INSERT INTO schema_migrations(version, name, applied_at) VALUES (5, 'future', 'now')",
+      )
+      .run();
+    newer.close();
+    const result = spawnSync(
+      cli,
+      ["src/cli.ts", "resume", "profile", "--json", "--db", dbPath],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /database is newer than this CLI/i);
+    assert.doesNotMatch(result.stderr, /SQLITE_ERROR|stack/i);
+  } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });

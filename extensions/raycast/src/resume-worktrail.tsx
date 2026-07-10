@@ -53,6 +53,7 @@ export default function ResumeWorktrail(
 ) {
   const preferences = getPreferenceValues<WorktrailPreferences>();
   const {
+    codexHomePath,
     databasePath,
     includeArchived,
     pnpmPath,
@@ -67,6 +68,7 @@ export default function ResumeWorktrail(
   const requestCoordinator = useRef(new SearchRequestCoordinator()).current;
   const query = searchText.trim();
   const searchPreferences = {
+    codexHomePath,
     databasePath,
     includeArchived,
     pnpmPath,
@@ -103,6 +105,7 @@ export default function ResumeWorktrail(
               worktrailPath ?? "",
               worktrailProjectPath ?? "",
               databasePath ?? "",
+              codexHomePath ?? "",
             ]),
             ...(debugCommand ? { debugCommand } : {}),
           });
@@ -114,6 +117,7 @@ export default function ResumeWorktrail(
       request?.cancel();
     };
   }, [
+    codexHomePath,
     databasePath,
     includeArchived,
     pnpmPath,
@@ -403,6 +407,7 @@ async function validateAndOpenCodex({
         preferences.worktrailPath ?? "",
         preferences.worktrailProjectPath ?? "",
         preferences.databasePath ?? "",
+        preferences.codexHomePath ?? "",
       ]),
     });
   }

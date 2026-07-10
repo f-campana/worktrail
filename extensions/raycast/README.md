@@ -25,6 +25,11 @@ npm install --global --prefix "$HOME/.local" .
 "$HOME/.local/bin/worktrail" resume "profile" --json --limit 5
 ```
 
+Run the installed `worktrail index` once after the first install and after CLI
+updates that may add migrations. To update an existing local install, rerun
+`pnpm build`, the `npm install --global --prefix "$HOME/.local" .` command, and
+then `"$HOME/.local/bin/worktrail" index`.
+
 Then import the private extension from this directory:
 
 ```sh
@@ -61,6 +66,11 @@ Enter on the selected target.
 - **Database Path** (optional): passed to Worktrail as `--db PATH`. `~` and
   `~/...` paths are supported. A configured path must be an existing file. If
   omitted, Worktrail uses its normal `~/.worktrail/worktrail.db` default.
+- **Codex home path** (optional): directory containing Codex `sessions/` and
+  `archived_sessions/`, for example `~/.codex`. Raycast expands `~`, validates
+  the directory, and passes the resolved path to both search and click-time
+  validation. Leave it empty to preserve Worktrail's `$CODEX_HOME` or
+  `~/.codex` default.
 - **Result Limit**: 3, 5 (default), 10, or 20.
 - **Include archived runs**: disabled by default.
 
@@ -88,8 +98,10 @@ pnpm --silent --dir <project-path> worktrail resume <query> --json --limit <limi
 ```
 
 The fallback's `--silent` pnpm option suppresses lifecycle banners so stdout
-contains only the JSON contract. The extension adds `--db <database-path>` and
-`--include-archived` only when their preferences are enabled. It parses
+contains only the JSON contract. The extension adds `--db <database-path>`,
+`--codex-home <codex-home-path>`, and `--include-archived` only when their
+preferences are enabled. The same Codex home is used by `resume` and `target
+validate`, and it is part of the exact-query cache key. It parses
 `ResumeSearchResult` schema version 1 and rejects unknown schema versions
 instead of guessing.
 
@@ -126,6 +138,8 @@ aliases from titles.
 
 Started-command failures show the exit code, one bounded sanitized line from
 stderr (or stdout when stderr is empty), and a home-normalized command summary.
+Known stale/newer database diagnostics are shown directly with an actionable
+index or CLI-update instruction; raw SQLite details are not displayed.
 The error action **Copy Debug Command** copies the shell-safe equivalent for a
 manual Terminal comparison. JSON parse, schema/version, timeout, preference,
 spawn, and unknown failures are classified separately.
@@ -229,6 +243,18 @@ Leave **Database Path** empty to use Worktrail's normal default under `HOME`, or
 select an existing SQLite database file. The extension expands `~`, validates
 an explicit file before starting either invocation mode, and passes the same
 resolved `HOME` to the child process.
+
+If Raycast says the database needs an update, run the installed `worktrail
+index` once in Terminal, then retry the search. Worktrail deliberately does not
+migrate or fully reindex during every launcher query.
+
+### Codex home path
+
+Leave **Codex home path** empty for the normal `$CODEX_HOME` or `~/.codex`
+behavior. Configure it only when Codex stores sessions elsewhere, and use that
+same path when indexing from Terminal. Raycast passes the path to Worktrail; it
+never reads Codex files itself. Debug commands normalize paths under the home
+directory to `$HOME`.
 
 ## Why not call pnpm forever?
 

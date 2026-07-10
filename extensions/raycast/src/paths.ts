@@ -23,6 +23,13 @@ export class WorktrailProjectPathError extends Error {
   }
 }
 
+export class CodexHomePathError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CodexHomePathError";
+  }
+}
+
 export function expandFilesystemPreferencePath(
   value: string,
   homeDirectory = homedir(),
@@ -158,6 +165,41 @@ export async function resolveOptionalDatabasePath(
   return resolvedPath;
 }
 
+export async function resolveOptionalCodexHomePath(
+  configuredPath: string | undefined,
+  homeDirectory = homedir(),
+): Promise<string | undefined> {
+  if (!configuredPath?.trim()) return undefined;
+  let resolvedPath: string;
+  try {
+    resolvedPath = expandFilesystemPreferencePath(
+      configuredPath,
+      homeDirectory,
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Invalid path.";
+    throw codexHomePathError(configuredPath, undefined, reason, homeDirectory);
+  }
+
+  const codexHomeStat = await stat(resolvedPath).catch(() => {
+    throw codexHomePathError(
+      configuredPath,
+      resolvedPath,
+      "The resolved path does not exist or cannot be read.",
+      homeDirectory,
+    );
+  });
+  if (!codexHomeStat.isDirectory()) {
+    throw codexHomePathError(
+      configuredPath,
+      resolvedPath,
+      "The resolved path is not a directory.",
+      homeDirectory,
+    );
+  }
+  return resolvedPath;
+}
+
 function identifiesWorktrail(packageJson: unknown): boolean {
   if (!isRecord(packageJson)) return false;
   if (packageJson.name === "worktrail") return true;
@@ -204,5 +246,23 @@ function databasePathError(
     : "";
   return new DatabasePathError(
     `Database path is invalid. Raycast received “${received}”${resolution}. ${reason} Set “Database path” to an existing Worktrail SQLite database file, or leave it empty to use ~/.worktrail/worktrail.db.`,
+  );
+}
+
+function codexHomePathError(
+  configuredPath: string,
+  resolvedPath: string | undefined,
+  reason: string,
+  homeDirectory: string,
+): CodexHomePathError {
+  const received = homeNormalizePath(
+    configuredPath.trim() || "(empty)",
+    homeDirectory,
+  );
+  const resolution = resolvedPath
+    ? `, which resolved to “${homeNormalizePath(resolvedPath, homeDirectory)}”`
+    : "";
+  return new CodexHomePathError(
+    `Codex home path is invalid. Raycast received “${received}”${resolution}. ${reason} Set “Codex home path” to the directory containing Codex sessions, for example: ~/.codex, or leave it empty to use Worktrail’s default.`,
   );
 }

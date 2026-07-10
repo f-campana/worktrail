@@ -14,9 +14,11 @@ import {
   resolvePnpmExecutable,
 } from "./pnpm.js";
 import {
+  CodexHomePathError,
   DatabasePathError,
   FilesystemPreferencePathError,
   resolveOptionalDatabasePath,
+  resolveOptionalCodexHomePath,
   resolveWorktrailProjectPath,
   WorktrailProjectPathError,
 } from "./paths.js";
@@ -185,6 +187,9 @@ function buildResumeArgs(
   if (preferences.databasePath?.trim()) {
     args.push("--db", preferences.databasePath);
   }
+  if (preferences.codexHomePath?.trim()) {
+    args.push("--codex-home", preferences.codexHomePath);
+  }
   if (preferences.includeArchived) args.push("--include-archived");
   return args;
 }
@@ -196,6 +201,9 @@ function buildTargetValidateArgs(
   const args = ["target", "validate", resumeRef, "--json"];
   if (preferences.databasePath?.trim()) {
     args.push("--db", preferences.databasePath);
+  }
+  if (preferences.codexHomePath?.trim()) {
+    args.push("--codex-home", preferences.codexHomePath);
   }
   return args;
 }
@@ -222,6 +230,10 @@ export async function searchWorktrail(
     preferences.databasePath,
     homeDirectory,
   );
+  const codexHomePath = await resolveOptionalCodexHomePath(
+    preferences.codexHomePath,
+    homeDirectory,
+  );
   const installedExecutable = await (
     dependencies.resolveWorktrailExecutable ?? resolveWorktrailExecutable
   )(preferences.worktrailPath, { homeDirectory });
@@ -233,7 +245,7 @@ export async function searchWorktrail(
     cwd = homeDirectory;
     invocation = buildInstalledWorktrailInvocation(
       query,
-      { ...preferences, databasePath },
+      { ...preferences, databasePath, codexHomePath },
       installedExecutable,
     );
   } else if (preferences.worktrailProjectPath?.trim()) {
@@ -248,7 +260,12 @@ export async function searchWorktrail(
     cwd = worktrailProjectPath;
     invocation = buildPnpmWorktrailInvocation(
       query,
-      { ...preferences, databasePath, worktrailProjectPath },
+      {
+        ...preferences,
+        databasePath,
+        codexHomePath,
+        worktrailProjectPath,
+      },
       pnpmExecutable,
     );
   } else {
@@ -328,6 +345,10 @@ export async function validateWorktrailTarget(
     preferences.databasePath,
     homeDirectory,
   );
+  const codexHomePath = await resolveOptionalCodexHomePath(
+    preferences.codexHomePath,
+    homeDirectory,
+  );
   const installedExecutable = await (
     dependencies.resolveWorktrailExecutable ?? resolveWorktrailExecutable
   )(preferences.worktrailPath, { homeDirectory });
@@ -339,7 +360,7 @@ export async function validateWorktrailTarget(
     cwd = homeDirectory;
     invocation = buildInstalledTargetValidationInvocation(
       resumeRef,
-      { ...preferences, databasePath },
+      { ...preferences, databasePath, codexHomePath },
       installedExecutable,
     );
   } else if (preferences.worktrailProjectPath?.trim()) {
@@ -354,7 +375,12 @@ export async function validateWorktrailTarget(
     cwd = worktrailProjectPath;
     invocation = buildPnpmTargetValidationInvocation(
       resumeRef,
-      { ...preferences, databasePath, worktrailProjectPath },
+      {
+        ...preferences,
+        databasePath,
+        codexHomePath,
+        worktrailProjectPath,
+      },
       pnpmExecutable,
     );
   } else {
@@ -444,6 +470,7 @@ export function resumeSearchCacheKey(
     preferences.resultLimit,
     preferences.includeArchived,
     preferences.databasePath?.trim() ?? "",
+    preferences.codexHomePath?.trim() ?? "",
     preferences.worktrailPath?.trim() ?? "",
     preferences.worktrailProjectPath?.trim() ?? "",
     preferences.pnpmPath?.trim() ?? "",
@@ -500,6 +527,7 @@ export function sanitizeErrorMessage(
   privatePaths: string[] = [],
 ): string {
   if (
+    error instanceof CodexHomePathError ||
     error instanceof WorktrailProjectPathError ||
     error instanceof DatabasePathError ||
     error instanceof FilesystemPreferencePathError ||
@@ -524,6 +552,12 @@ export function sanitizeErrorMessage(
   if (error instanceof WorktrailCliError) {
     const outputKind = error.stderr.trim() ? "stderr" : "stdout";
     const output = error.stderr.trim() || error.stdout.trim();
+    const actionableDatabaseMessage = databaseSchemaMessage(output);
+    if (actionableDatabaseMessage) {
+      return boundedErrorMessage(
+        `${actionableDatabaseMessage} Command: ${error.debugCommand}. Use “Copy Debug Command” and run it in Terminal.`,
+      );
+    }
     const detail = output
       ? ` ${outputKind}: ${sanitizeDiagnosticText(output, privatePaths)}.`
       : " No stderr or stdout was captured.";
@@ -553,6 +587,16 @@ export function sanitizeErrorMessage(
   return boundedErrorMessage(
     `Unexpected Worktrail search failure. ${sanitized || "No details were captured."}`,
   );
+}
+
+function databaseSchemaMessage(output: string): string | undefined {
+  if (/Worktrail database needs an update\./i.test(output)) {
+    return "Worktrail database needs an update. Run `worktrail index` once, then retry.";
+  }
+  if (/Worktrail database is newer than this CLI\./i.test(output)) {
+    return "Worktrail database is newer than this CLI. Update Worktrail, then retry.";
+  }
+  return undefined;
 }
 
 export function debugCommandFromError(error: unknown): string | undefined {

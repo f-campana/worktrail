@@ -75,6 +75,7 @@ export type WorktrailPreferences = {
   pnpmPath?: string;
   worktrailProjectPath?: string;
   databasePath?: string;
+  codexHomePath?: string;
   resultLimit: string;
   includeArchived: boolean;
 };

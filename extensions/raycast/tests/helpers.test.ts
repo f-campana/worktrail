@@ -38,6 +38,7 @@ import {
 import {
   expandFilesystemPreferencePath,
   homeNormalizePath,
+  resolveOptionalCodexHomePath,
   resolveOptionalDatabasePath,
   resolveWorktrailProjectPath,
 } from "../src/paths.js";
@@ -333,6 +334,38 @@ test("builds an argument-safe installed executable invocation", () => {
     "/tmp/worktrail.db",
     "--include-archived",
   ]);
+});
+
+test("includes custom Codex home in resume and target validation invocations", () => {
+  const preferences = {
+    codexHomePath: "/Users/example/custom codex",
+    resultLimit: "5",
+    includeArchived: false,
+  };
+  assert.deepEqual(
+    buildInstalledWorktrailInvocation("profile", preferences).args,
+    [
+      "resume",
+      "profile",
+      "--json",
+      "--limit",
+      "5",
+      "--codex-home",
+      "/Users/example/custom codex",
+    ],
+  );
+  assert.deepEqual(
+    buildInstalledTargetValidationInvocation(target.resumeRef!, preferences)
+      .args,
+    [
+      "target",
+      "validate",
+      target.resumeRef,
+      "--json",
+      "--codex-home",
+      "/Users/example/custom codex",
+    ],
+  );
 });
 
 test("builds an argument-safe pnpm fallback invocation", () => {
@@ -637,6 +670,45 @@ test("validates a target through Worktrail before opening", async () => {
   });
 });
 
+test("expands and passes custom Codex home for search and validation", async (t) => {
+  const homeDirectory = await mkdtemp(join(tmpdir(), "worktrail-raycast-"));
+  t.after(() => rm(homeDirectory, { recursive: true, force: true }));
+  const codexHomePath = join(homeDirectory, ".codex-custom");
+  await mkdir(codexHomePath);
+  const invocations: string[][] = [];
+  const preferences = {
+    codexHomePath: "~/.codex-custom",
+    resultLimit: "5",
+    includeArchived: false,
+  };
+  const dependencies = {
+    homeDirectory,
+    resolveWorktrailExecutable: async () => "/usr/local/bin/worktrail",
+    execute: async (_program: string, args: string[]) => {
+      invocations.push(args);
+      return args[0] === "resume"
+        ? JSON.stringify(response({ query: "profile" }))
+        : JSON.stringify({
+            schemaVersion: 1,
+            resumeRef: target.resumeRef,
+            status: "openable",
+            openUrl: target.openActions[0]?.value,
+          });
+    },
+  };
+
+  await searchWorktrail("profile", preferences, undefined, dependencies);
+  await validateWorktrailTarget(
+    target.resumeRef!,
+    preferences,
+    undefined,
+    dependencies,
+  );
+
+  assert.deepEqual(invocations[0]?.slice(-2), ["--codex-home", codexHomePath]);
+  assert.deepEqual(invocations[1]?.slice(-2), ["--codex-home", codexHomePath]);
+});
+
 test("search uses the bare Worktrail PATH fallback", async () => {
   let program = "";
   await searchWorktrail(
@@ -696,6 +768,13 @@ test("session cache is keyed by exact query and search preferences", async () =>
     resumeSearchCacheKey("profile", {
       ...preferences,
       includeArchived: true,
+    }),
+  );
+  assert.notEqual(
+    resumeSearchCacheKey("profile", preferences),
+    resumeSearchCacheKey("profile", {
+      ...preferences,
+      codexHomePath: "~/.codex-custom",
     }),
   );
 
@@ -769,6 +848,32 @@ test("expands and validates an optional database path", async (t) => {
   assert.equal(
     await resolveOptionalDatabasePath("  ", homeDirectory),
     undefined,
+  );
+});
+
+test("expands and validates an optional Codex home path", async (t) => {
+  const homeDirectory = await mkdtemp(join(tmpdir(), "worktrail-codex-home-"));
+  t.after(() => rm(homeDirectory, { recursive: true, force: true }));
+  const codexHomePath = join(homeDirectory, ".codex-custom");
+  await mkdir(codexHomePath);
+
+  assert.equal(
+    await resolveOptionalCodexHomePath("~/.codex-custom", homeDirectory),
+    codexHomePath,
+  );
+  assert.equal(
+    await resolveOptionalCodexHomePath("  ", homeDirectory),
+    undefined,
+  );
+  await assert.rejects(
+    resolveOptionalCodexHomePath("~/.missing-codex", homeDirectory),
+    (error: unknown) => {
+      const message = sanitizeErrorMessage(error);
+      assert.match(message, /^Codex home path is invalid\./);
+      assert.match(message, /~\/\.missing-codex/);
+      assert.doesNotMatch(message, new RegExp(homeDirectory));
+      return true;
+    },
   );
 });
 
@@ -1027,6 +1132,40 @@ test("uses bounded stdout when stderr is empty", async (t) => {
   assert.doesNotMatch(message, /additional output omitted/);
 });
 
+test("shows an actionable sanitized stale-schema error", async (t) => {
+  const error = await captureError(
+    withFakeExecution(t, async () => {
+      throw Object.assign(new Error("command failed"), {
+        code: 1,
+        stderr:
+          "worktrail: Worktrail database needs an update. Run `worktrail index` once, then retry.\nraw stack omitted",
+        stdout: "",
+      });
+    }),
+  );
+  const message = sanitizeErrorMessage(error);
+
+  assert.match(message, /^Worktrail database needs an update\./);
+  assert.match(message, /worktrail index/);
+  assert.match(message, /Copy Debug Command/);
+  assert.doesNotMatch(message, /raw stack omitted|stderr:/);
+
+  const newerError = await captureError(
+    withFakeExecution(t, async () => {
+      throw Object.assign(new Error("command failed"), {
+        code: 1,
+        stderr:
+          "worktrail: Worktrail database is newer than this CLI. Update Worktrail, then retry.\nprivate stack omitted",
+        stdout: "",
+      });
+    }),
+  );
+  const newerMessage = sanitizeErrorMessage(newerError);
+  assert.match(newerMessage, /^Worktrail database is newer than this CLI\./);
+  assert.match(newerMessage, /Update Worktrail/);
+  assert.doesNotMatch(newerMessage, /private stack omitted|stderr:/);
+});
+
 test("reports invalid JSON without treating stderr warnings as JSON", async (t) => {
   const error = await captureError(
     withFakeExecution(
@@ -1102,6 +1241,7 @@ test("formats a home-normalized shell-safe debug command", () => {
       {
         worktrailProjectPath: "/Users/private/Documents/worktrail",
         databasePath: "/Users/private/.worktrail/worktrail.db",
+        codexHomePath: "/Users/private/.codex-custom",
         resultLimit: "5",
         includeArchived: false,
       },
@@ -1112,7 +1252,7 @@ test("formats a home-normalized shell-safe debug command", () => {
 
   assert.equal(
     command,
-    `/opt/homebrew/bin/pnpm --silent --dir "$HOME/Documents/worktrail" worktrail resume 'github profile; echo nope' --json --limit 5 --db "$HOME/.worktrail/worktrail.db"`,
+    `/opt/homebrew/bin/pnpm --silent --dir "$HOME/Documents/worktrail" worktrail resume 'github profile; echo nope' --json --limit 5 --db "$HOME/.worktrail/worktrail.db" --codex-home "$HOME/.codex-custom"`,
   );
   assert.doesNotMatch(command, /\/Users\/private/);
 });

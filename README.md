@@ -75,6 +75,11 @@ Add `$HOME/.local/bin` to `PATH` if needed, or call the absolute executable:
 ```
 
 Re-run `pnpm build` and the `npm install` command after local source changes.
+After installing or updating the CLI, run `worktrail index` once. This applies
+pending database migrations and incrementally refreshes changed Codex sources;
+unchanged sources are skipped. The read-only `resume` and `target validate`
+commands never migrate automatically. If they report that the database needs
+an update, run `worktrail index` and retry.
 For development, `pnpm worktrail ...` remains supported and executes the
 TypeScript source directly.
 
@@ -365,6 +370,10 @@ pnpm worktrail state "resume safe apply GUI"
 
 The default local database is `~/.worktrail/worktrail.db`. Override it with
 `--db PATH`, and override the Codex directory with `--codex-home PATH`.
+Set the same Codex home for `index`, `resume`, and `target validate`; otherwise
+freshness checks may inspect a different source tree than the one that was
+indexed. If `--codex-home` is omitted, all three use `$CODEX_HOME` or
+`~/.codex`.
 
 Fast Resume freshness is source-state based, not reindex based. The Codex-local
 checker compares candidate thread IDs to current rollout metadata under
@@ -372,6 +381,9 @@ checker compares candidate thread IDs to current rollout metadata under
 the state is `missing`. If the source shape cannot be classified safely, the
 state is `unknown` and the result is not hidden solely for that reason. The hot
 `resume` path stays read-only and does not refresh persistent archive flags.
+It performs only a lightweight schema compatibility read before searching. An
+older database fails with an actionable `worktrail index` instruction instead
+of running migrations on the launcher path.
 
 Validate one target before opening it from a cached or external client result:
 

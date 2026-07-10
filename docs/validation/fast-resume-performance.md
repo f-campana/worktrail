@@ -53,7 +53,7 @@ The first serial `fodmapp` query took 6,575 ms. Repeated process invocations rem
 
 ## Changes
 
-- `resume` now opens SQLite read-only with `query_only`, skips directory creation, WAL mutation, and migration checks, and performs no reconciliation.
+- `resume` now opens SQLite read-only with `query_only`, skips directory creation, WAL mutation, migration execution, and reconciliation. A later v0 hardening pass added one lightweight migration-version read so stale databases fail clearly without changing this read-only model.
 - Project metadata is filtered and ranked before document fields are loaded. Only potentially returned project rows load document fields.
 - FTS candidate rows no longer transfer complete searchable text. Exact content-term checks run inside SQLite only for candidates that can affect the requested resume limit.
 - Evidence and related files are hydrated only for candidates relevant to the requested resume limit. A full-search fallback preserves canonical-workstream correctness when grouping collapses too many candidates.
