@@ -10,6 +10,7 @@ import {
 } from "../src/attention.js";
 import { WorktrailDatabase } from "../src/db/database.js";
 import { buildDailyReport } from "../src/report.js";
+import type { SourceStateProvider } from "../src/source-state.js";
 import { assignThread, createWorkstream } from "../src/workstreams.js";
 import {
   insertSyntheticThread,
@@ -26,7 +27,7 @@ const options = {
   clock: () => new Date(generatedAt),
 };
 
-test("builds the deterministic Phase 1 skeleton from one report window", async () =>
+test("builds the deterministic Phase 2 skeleton from one report window", async () =>
   withDatabase((database) => {
     const digest = buildAttentionDigest(database, options);
     assert.equal(digest.schemaVersion, 1);
@@ -54,7 +55,149 @@ test("builds the deterministic Phase 1 skeleton from one report window", async (
       missingTargets: 0,
       unavailableSourceObservations: 0,
     });
-    assert.match(digest.limitations.at(-1)!, /Phase 1 only/);
+    assert.match(digest.limitations.at(-1)!, /Phase 2 only/);
+  }));
+
+test("adds safe actions only for active Codex targets", async () =>
+  withDatabase((database) => {
+    const id = syntheticId(30);
+    insertRun(database, id, "Active target", "2026-06-18T15:00:00.000Z");
+    const digest = buildAttentionDigest(database, {
+      ...options,
+      sourceStateProvider: states({ [id]: "active" }),
+    });
+    assert.deepEqual(digest.changedWork[0]?.actions, [
+      {
+        kind: "open-codex",
+        label: "Open in Codex",
+        value: `codex://threads/${id}`,
+        target: { sourceTool: "codex-local", resumeRef: id },
+        validation: "validate-before-open",
+      },
+      {
+        kind: "copy-command",
+        label: "Copy Codex resume command",
+        value: `codex resume ${id}`,
+        target: { sourceTool: "codex-local", resumeRef: id },
+        validation: "not-required",
+      },
+    ]);
+    assert.deepEqual(digest.omitted, {
+      ignoredRuns: 0,
+      archivedTargets: 0,
+      missingTargets: 0,
+      unavailableSourceObservations: 0,
+    });
+  }));
+
+test("archived, missing, and unknown targets fail closed without attention items", async () =>
+  withDatabase((database) => {
+    const archived = syntheticId(31);
+    const missing = syntheticId(32);
+    const unknown = syntheticId(33);
+    insertRun(
+      database,
+      archived,
+      "Archived target",
+      "2026-06-18T15:00:00.000Z",
+    );
+    insertRun(database, missing, "Missing target", "2026-06-18T14:00:00.000Z");
+    insertRun(database, unknown, "Unknown target", "2026-06-18T13:00:00.000Z");
+    const digest = buildAttentionDigest(database, {
+      ...options,
+      sourceStateProvider: states({
+        [archived]: "archived",
+        [missing]: "missing",
+        [unknown]: "unknown",
+      }),
+    });
+    assert.deepEqual(
+      digest.changedWork.flatMap((group) => group.actions),
+      [],
+    );
+    assert.deepEqual(digest.omitted, {
+      ignoredRuns: 0,
+      archivedTargets: 1,
+      missingTargets: 1,
+      unavailableSourceObservations: 1,
+    });
+    assert.deepEqual(digest.attentionItems, []);
+    assert.deepEqual(digest.sourceHealth, []);
+    assert.equal(digest.summary.sourceHealth, "unknown");
+    assert.ok(digest.limitations.some((item) => item.includes("fail closed")));
+  }));
+
+test("group action prefers the latest active run while counting older unavailable targets", async () =>
+  withDatabase((database) => {
+    const latestArchived = syntheticId(34);
+    const latestActive = syntheticId(35);
+    const olderActive = syntheticId(36);
+    const missing = syntheticId(37);
+    for (const [id, title, at] of [
+      [latestArchived, "Latest archived", "2026-06-18T16:00:00.000Z"],
+      [latestActive, "Latest active", "2026-06-18T15:00:00.000Z"],
+      [olderActive, "Older active", "2026-06-18T14:00:00.000Z"],
+      [missing, "Older missing", "2026-06-18T13:00:00.000Z"],
+    ] as const)
+      insertRun(database, id, title, at);
+    const workstream = createWorkstream(database, "Shared group");
+    for (const id of [latestArchived, latestActive, olderActive, missing])
+      assignThread(database, id, workstream.id);
+
+    const digest = buildAttentionDigest(database, {
+      ...options,
+      sourceStateProvider: states({
+        [latestArchived]: "archived",
+        [latestActive]: "active",
+        [olderActive]: "active",
+        [missing]: "missing",
+      }),
+    });
+    assert.equal(digest.changedWork.length, 1);
+    assert.equal(
+      digest.changedWork[0]?.actions[0]?.value,
+      `codex://threads/${latestActive}`,
+    );
+    assert.equal(digest.omitted.archivedTargets, 1);
+    assert.equal(digest.omitted.missingTargets, 1);
+    assert.equal(digest.attentionItems.length, 0);
+  }));
+
+test("absent observations and unsafe refs never produce open actions", async () =>
+  withDatabase((database) => {
+    const id = syntheticId(38);
+    insertRun(database, id, "Absent observation", "2026-06-18T15:00:00.000Z");
+    const unsafe = syntheticId(39);
+    insertRun(database, unsafe, "Unsafe ref", "2026-06-18T14:00:00.000Z");
+    database.raw
+      .prepare(
+        "UPDATE source_threads SET resume_ref = 'not-a-uuid' WHERE external_id = ?",
+      )
+      .run(unsafe);
+    const digest = buildAttentionDigest(database, {
+      ...options,
+      sourceStateProvider: () => [],
+    });
+    assert.deepEqual(
+      digest.changedWork.flatMap((group) => group.actions),
+      [],
+    );
+    assert.equal(digest.omitted.unavailableSourceObservations, 2);
+  }));
+
+test("source provider failures become unavailable observations", async () =>
+  withDatabase((database) => {
+    const id = syntheticId(40);
+    insertRun(database, id, "Provider failure", "2026-06-18T15:00:00.000Z");
+    const digest = buildAttentionDigest(database, {
+      ...options,
+      sourceStateProvider: () => {
+        throw new Error("source unavailable");
+      },
+    });
+    assert.deepEqual(digest.changedWork[0]?.actions, []);
+    assert.equal(digest.omitted.unavailableSourceObservations, 1);
+    assert.deepEqual(digest.attentionItems, []);
   }));
 
 test("groups canonical, durable project, and unassigned work exactly once", async () =>
@@ -231,4 +374,33 @@ async function withDatabase(
     database.close();
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+function insertRun(
+  database: WorktrailDatabase,
+  externalId: string,
+  title: string,
+  updatedAt: string,
+): void {
+  insertSyntheticThread(database, {
+    externalId,
+    title,
+    cwd: "/safe/example",
+    updatedAt,
+    evidence: [],
+    files: [],
+  });
+}
+
+function states(
+  values: Record<string, "active" | "archived" | "missing" | "unknown">,
+): SourceStateProvider {
+  return (requests) =>
+    requests.map((request) => ({
+      sourceId: request.sourceId,
+      resumeRef: request.resumeRef,
+      state: values[request.resumeRef] ?? "unknown",
+      observedAt: generatedAt,
+      sourceTool: "codex-local",
+    }));
 }

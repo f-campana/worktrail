@@ -25,12 +25,16 @@ export type TargetValidationResult = {
 const SAFE_CODEX_THREAD_REF =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+export function isSafeCodexThreadRef(resumeRef: string): boolean {
+  return SAFE_CODEX_THREAD_REF.test(resumeRef);
+}
+
 export function validateResumeTarget(
   database: WorktrailDatabase,
   resumeRef: string,
   options: { sourceStateProvider?: SourceStateProvider } = {},
 ): TargetValidationResult {
-  if (!SAFE_CODEX_THREAD_REF.test(resumeRef)) {
+  if (!isSafeCodexThreadRef(resumeRef)) {
     return {
       schemaVersion: TARGET_VALIDATION_SCHEMA_VERSION,
       resumeRef,

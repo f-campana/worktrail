@@ -4,6 +4,17 @@ import {
   type DailyReport,
   type DailyReportRun,
 } from "./report.js";
+import {
+  createCodexLocalSourceStateProvider,
+  sourceStateRequestsForCandidates,
+  type SourceStateCandidate,
+  type SourceStateProvider,
+} from "./source-state.js";
+import { isSafeCodexThreadRef } from "./target-validation.js";
+import type {
+  SourceThreadState,
+  SourceThreadStateObservation,
+} from "./types.js";
 
 export const ATTENTION_DIGEST_SCHEMA_VERSION = 1 as const;
 
@@ -115,26 +126,46 @@ export type BuildAttentionDigestOptions = {
   until: Date;
   timezone: string;
   clock?: () => Date;
+  sourceStateProvider?: SourceStateProvider;
 };
 
-const PHASE_ONE_LIMITATION =
-  "Phase 1 only; attention rules, source health, and source-state checks are not evaluated.";
+export type BuildAttentionDigestFromReportOptions = {
+  sourceStateProvider?: SourceStateProvider;
+};
 
-/** Builds the Phase 1 digest by composing exactly one DailyReport result. */
+const PHASE_TWO_LIMITATION =
+  "Phase 2 only; changed-work source-state and safe actions are evaluated, but attention rules and source-health aggregation are not.";
+const UNKNOWN_TARGET_LIMITATION =
+  "One or more changed-work Codex targets could not be verified; unknown targets fail closed and expose no open action.";
+
+/** Builds the Phase 2 digest by composing exactly one DailyReport result. */
 export function buildAttentionDigest(
   database: WorktrailDatabase,
   options: BuildAttentionDigestOptions,
 ): AttentionDigestResult {
   const report = buildDailyReport(database, options);
-  return buildAttentionDigestFromReport(database, report);
+  return buildAttentionDigestFromReport(database, report, {
+    ...(options.sourceStateProvider
+      ? { sourceStateProvider: options.sourceStateProvider }
+      : {}),
+  });
 }
 
-/** Maps an already composed report into the Phase 1 digest contract. */
+/** Maps an already composed report into the Phase 2 digest contract. */
 export function buildAttentionDigestFromReport(
   database: WorktrailDatabase,
   report: DailyReport,
+  options: BuildAttentionDigestFromReportOptions = {},
 ): AttentionDigestResult {
   const changedWork = buildChangedWork(database, report);
+  const sourceState = observeChangedWorkSourceState(
+    database,
+    changedWork,
+    options.sourceStateProvider ?? createCodexLocalSourceStateProvider(),
+  );
+  const observedChangedWork = changedWork.map((group) =>
+    addSafeGroupActions(group, sourceState.observations),
+  );
   return {
     schemaVersion: ATTENTION_DIGEST_SCHEMA_VERSION,
     generatedAt: report.generatedAt,
@@ -145,20 +176,114 @@ export function buildAttentionDigestFromReport(
       mediumCount: 0,
       lowCount: 0,
       infoCount: 0,
-      changedWorkCount: changedWork.length,
+      changedWorkCount: observedChangedWork.length,
       sourceHealth: "unknown",
     },
     attentionItems: [],
-    changedWork,
+    changedWork: observedChangedWork,
     sourceHealth: [],
     omitted: {
       ignoredRuns: report.omitted.ignoredRuns,
-      archivedTargets: 0,
-      missingTargets: 0,
-      unavailableSourceObservations: 0,
+      archivedTargets: sourceState.counts.archived,
+      missingTargets: sourceState.counts.missing,
+      unavailableSourceObservations: sourceState.counts.unknown,
     },
-    limitations: [...new Set([...report.limitations, PHASE_ONE_LIMITATION])],
+    limitations: [
+      ...new Set([
+        ...report.limitations,
+        PHASE_TWO_LIMITATION,
+        ...(sourceState.counts.unknown > 0 ? [UNKNOWN_TARGET_LIMITATION] : []),
+      ]),
+    ],
   };
+}
+
+function observeChangedWorkSourceState(
+  database: WorktrailDatabase,
+  changedWork: ChangedWorkGroup[],
+  provider: SourceStateProvider,
+): {
+  observations: Map<string, SourceThreadStateObservation>;
+  counts: Record<Exclude<SourceThreadState, "active">, number>;
+} {
+  const candidates = uniqueSourceStateCandidates(
+    changedWork.flatMap((group) => group.runs),
+  );
+  let returned: SourceThreadStateObservation[] = [];
+  try {
+    returned = provider(sourceStateRequestsForCandidates(database, candidates));
+  } catch {
+    // A bounded source-state failure is represented as unknown for every
+    // affected target; the digest must fail closed rather than expose actions.
+  }
+  const observations = new Map(
+    returned.map((observation) => [sourceStateKey(observation), observation]),
+  );
+  const counts = { archived: 0, missing: 0, unknown: 0 };
+  for (const candidate of candidates) {
+    const state =
+      observations.get(sourceStateKey(candidate))?.state ?? "unknown";
+    if (state !== "active") counts[state] += 1;
+  }
+  return { observations, counts };
+}
+
+function uniqueSourceStateCandidates(
+  runs: DailyReportRun[],
+): SourceStateCandidate[] {
+  const candidates = new Map<string, SourceStateCandidate>();
+  for (const run of runs) {
+    if (run.sourceTool !== "codex-local" || !run.resumeRef) continue;
+    const candidate = {
+      sourceId: run.sourceId,
+      resumeRef: run.resumeRef,
+      sourceTool: run.sourceTool,
+    };
+    candidates.set(sourceStateKey(candidate), candidate);
+  }
+  return [...candidates.values()];
+}
+
+function addSafeGroupActions(
+  group: ChangedWorkGroup,
+  observations: ReadonlyMap<string, SourceThreadStateObservation>,
+): ChangedWorkGroup {
+  const active = group.runs.find((run) => {
+    if (
+      run.sourceTool !== "codex-local" ||
+      !isSafeCodexThreadRef(run.resumeRef)
+    )
+      return false;
+    return observations.get(sourceStateKey(run))?.state === "active";
+  });
+  if (!active) return group;
+  const target = { sourceTool: "codex-local", resumeRef: active.resumeRef };
+  return {
+    ...group,
+    actions: [
+      {
+        kind: "open-codex",
+        label: "Open in Codex",
+        value: `codex://threads/${active.resumeRef}`,
+        target,
+        validation: "validate-before-open",
+      },
+      {
+        kind: "copy-command",
+        label: "Copy Codex resume command",
+        value: `codex resume ${active.resumeRef}`,
+        target,
+        validation: "not-required",
+      },
+    ],
+  };
+}
+
+function sourceStateKey(candidate: {
+  sourceId: string;
+  resumeRef: string;
+}): string {
+  return `${candidate.sourceId}\0${candidate.resumeRef}`;
 }
 
 function buildChangedWork(
