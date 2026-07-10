@@ -55,6 +55,7 @@ test("build emits a directly executable CLI with runtime migrations", async () =
     );
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).schemaVersion, 1);
+    assert.doesNotMatch(result.stderr, /ExperimentalWarning.*SQLite/i);
   } finally {
     try {
       database.close();
