@@ -8,6 +8,8 @@ local web UI.
 Product vocabulary and the current Control Tower direction are documented in
 [`CONTEXT.md`](CONTEXT.md), the
 [`strategy digest`](docs/strategy/WORKTRAIL_CONVERSATION_DIGEST.md), and the
+[`Control Tower / Watch Tower v0 RFC`](docs/rfc/control-tower-watch-tower-v0.md).
+The existing report baseline is specified in the
 [`daily report PRD`](docs/prd/control-tower-daily-report.md). The Project
 Identity + Aliases v0 foundation is specified in the
 [`Project Identity + Aliases v0 RFC`](docs/rfc/project-identity-aliases-v0.md).
